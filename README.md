@@ -9,7 +9,7 @@ It supports focused, split and four-terminal layouts, saved selections, terminal
 history, attention, task review and remembered Claude/Codex/Pi conversations.
 
 **This is a separate source repository, not a standalone orchestration system.**
-It requires compatible cc-sessions installations in the projects it observes.
+It requires a compatible workspace CLI installed in the projects it observes.
 The executable remains `cc-cockpit`; no binary or runtime-state rename was made.
 
 ## Build and check
@@ -34,7 +34,7 @@ cargo install --locked --path .
 ## Launch
 
 From a regular interactive WSL terminal, outside tmux, use a project with a
-compatible installed cc-sessions CLI and existing original tmux sessions:
+compatible installed workspace CLI and existing original tmux sessions:
 
 ```bash
 cc-cockpit --project /path/to/project --list
@@ -79,10 +79,9 @@ unverified. See the development notes before treating this as a daily driver.
 
 ## Provenance and public contents
 
-[The extraction manifest](docs/PROVENANCE.json) identifies the source revision and
-hashes of unchanged Rust files. This is a clean snapshot, not an import of the
-original Git history. Raw session transcripts, SQLite databases, prompts, runtime
-manifests, screenshots, test execution logs and historical evidence are excluded.
-Original development history and evidence remain in the cc-sessions repository.
+[The baseline manifest](docs/PROVENANCE.json) records file hashes from the initial
+local import. Later changes may differ from those baseline hashes. Raw session
+transcripts, SQLite databases, prompts, runtime manifests, screenshots, test
+execution logs and historical evidence are excluded.
 
-See `LICENSE`, `LICENSE-cc-sessions` and `NOTICE` for attribution.
+See `LICENSE` for the project licence.

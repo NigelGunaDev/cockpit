@@ -231,8 +231,9 @@ mod tests {
             assert!(width(&visible) <= columns, "{columns}: {visible}");
             assert!(!text.contains("evil"));
             if columns >= 24 {
-                assert!(text.contains("range=user|cc-sessions"));
-                assert!(text.contains("range=user|cc-help"));
+                for id in ["sessions", "help"] {
+                    assert!(text.contains(&format!("range=user|cc-{id}")));
+                }
             }
             if columns >= 29 {
                 assert!(text.contains("range=user|cc-palette"));

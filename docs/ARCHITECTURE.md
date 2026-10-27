@@ -5,7 +5,7 @@
 | Original tmux server | Existing task sessions, panes and agent processes |
 | Private transient tmux UI server | Cockpit layout, disposable original-server attachment clients and native input routing |
 | Rust supervisor | Discovery, target validation, focus, layout, panels and local reconciliation |
-| Installed cc-sessions CLI | Task/workspace operations, observations, review/history readers, recovery and exact Close |
+| Installed workspace CLI | Task/workspace operations, observations, review/history readers, recovery and exact Close |
 | Project workflow files | Task lifecycle and approval authority |
 | Cockpit SQLite registry | User-local native-conversation restore intent and verified identity; no task lifecycle state |
 | Presentation preferences | Selected/pinned terminals and layout; no authority to accept a replacement runtime |

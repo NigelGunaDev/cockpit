@@ -21,7 +21,7 @@ Forget; use explicit Close/Forget for restart exclusion.
 
 ## Returning to this project
 
-1. Use a disposable Git project with a compatible installed cc-sessions CLI.
+1. Use a disposable Git project with a compatible installed workspace CLI.
 2. Run the preserved unit tests, formatting, Clippy and locked release build.
 3. Validate a focused native attachment, detach/reopen and exact target loss.
 4. Exercise splits/grid, native concurrent clients, sizing, scrolling and input.
@@ -47,5 +47,5 @@ Executed from this separate checkout using rustc 1.99.1 and Cargo 1.99.1:
 
 No live terminal, agent, reboot or production performance test was rerun during
 extraction. Raw build/test output remains local and is not published. The original
-acceptance drivers depend on cc-sessions fixture layout and need deliberate
+acceptance drivers depend on the original fixture layout and need deliberate
 adaptation before they can be runnable here.

@@ -23,7 +23,7 @@ pub fn discover_project(start: &Path) -> Result<String, String> {
         }
     }
     Err(format!(
-        "No installed sessions CLI above {}. Use --project PATH or install cc-sessions in this project.",
+        "No compatible workspace CLI above {}. Use --project PATH with a project containing sessions/bin/sessions.",
         start.display()
     ))
 }
