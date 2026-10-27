@@ -1,0 +1,120 @@
+{
+  "source_repository": "https://github.com/NigelGunaDev/cc-sessions",
+  "source_revision": "0525fe255fdf7bd2942fb98e34febfc90109ff4f",
+  "source_directory": "cc_sessions/cockpit",
+  "extraction": "reviewed source snapshot; original Git history not imported",
+  "unchanged_source_files": {
+    "Cargo.lock": {
+      "original": "cc_sessions/cockpit/Cargo.lock",
+      "sha256": "bb2a49355abd89baf5dcb13e26066084f30d650bf7d327d302331f0f3b94da2f"
+    },
+    "Cargo.toml": {
+      "original": "cc_sessions/cockpit/Cargo.toml",
+      "sha256": "96da5ac85acde66f2f2630ff3f31c2f4e751a826a602950e14429d8cf0c70207"
+    },
+    "src/actions.rs": {
+      "original": "cc_sessions/cockpit/src/actions.rs",
+      "sha256": "928fd36ac3e491308cebc7fa3a4fd6ce0b44e12f5fa68e172274dc6e61eea0f1"
+    },
+    "src/agents.rs": {
+      "original": "cc_sessions/cockpit/src/agents.rs",
+      "sha256": "b0bdde94d0da5ad7f248080e5e6023c7ef168d98d30da21af963b7cb6f3950ba"
+    },
+    "src/attention.rs": {
+      "original": "cc_sessions/cockpit/src/attention.rs",
+      "sha256": "addd5a913be98cbf3f5bc106238f13715db548d8f4f5b1fa6e9ec18eb13da8df"
+    },
+    "src/changes.rs": {
+      "original": "cc_sessions/cockpit/src/changes.rs",
+      "sha256": "d2004f355ad1c7cba48241d6656d1f861350694f7d69a3588f82775273e9cf0f"
+    },
+    "src/commands.rs": {
+      "original": "cc_sessions/cockpit/src/commands.rs",
+      "sha256": "04cf225a469eef99df3eebe369fffd01339b8e8ea6de2f7c4120ccfbb57940ea"
+    },
+    "src/help.rs": {
+      "original": "cc_sessions/cockpit/src/help.rs",
+      "sha256": "3f152f07a734c67f9bd81cc55d78ad8c7ac195feadc676c091dcd43775c4076e"
+    },
+    "src/history.rs": {
+      "original": "cc_sessions/cockpit/src/history.rs",
+      "sha256": "21c1aaa60003c91ce92fdb01b8cce4c70489c69bf28c6fb8e11c5db19b92521d"
+    },
+    "src/interaction.rs": {
+      "original": "cc_sessions/cockpit/src/interaction.rs",
+      "sha256": "c792e7a9753523dd9e2ed6b0f4408c0e26767c65acec4fea64d3d41a4a8378d4"
+    },
+    "src/key_hints.rs": {
+      "original": "cc_sessions/cockpit/src/key_hints.rs",
+      "sha256": "05bd10945a32b968110ce64d8e4b47bf914b674229ec19b8b1198b171bd1930b"
+    },
+    "src/layout.rs": {
+      "original": "cc_sessions/cockpit/src/layout.rs",
+      "sha256": "54309e5400a1d692d95bb8dec6328f16178b7c0cf6db4c8b4b79e5c6d4bba558"
+    },
+    "src/main.rs": {
+      "original": "cc_sessions/cockpit/src/main.rs",
+      "sha256": "d4ec81a2f98cd8f4704a03a5dd8d5a3d5283299f2915d8783d0f3ecc7064eb83"
+    },
+    "src/model.rs": {
+      "original": "cc_sessions/cockpit/src/model.rs",
+      "sha256": "76b31f6f8e1ba68bec5ebbbdcc4fdd09960580ab7e26b00a25d06ef239f26212"
+    },
+    "src/navigation.rs": {
+      "original": "cc_sessions/cockpit/src/navigation.rs",
+      "sha256": "d2025d71e558a54699f1d4a96aecef6f25755527622c07daf660615070798dfc"
+    },
+    "src/observe.rs": {
+      "original": "cc_sessions/cockpit/src/observe.rs",
+      "sha256": "dd2617ad990b9189fc6d7823a5098ea420045bc1f8803c24015b06363b5fa095"
+    },
+    "src/palette.rs": {
+      "original": "cc_sessions/cockpit/src/palette.rs",
+      "sha256": "7950308ef87eaeb7480683b1611da55d9c592dc254e5f2b58e51fb72e744e01f"
+    },
+    "src/preferences.rs": {
+      "original": "cc_sessions/cockpit/src/preferences.rs",
+      "sha256": "b5d22349d197431c42aa20086ec9737aae678e811b252b025a103370805b5848"
+    },
+    "src/presentation.rs": {
+      "original": "cc_sessions/cockpit/src/presentation.rs",
+      "sha256": "7309dd6e5ad4590c11f923ded033b35800155e30e6f1cce8493e1a8391517131"
+    },
+    "src/queue.rs": {
+      "original": "cc_sessions/cockpit/src/queue.rs",
+      "sha256": "fdc44547ab192ef6a09e4e09609b81e86fa7f1070cd4fbd9c7935a9d64bc63b7"
+    },
+    "src/recovery.rs": {
+      "original": "cc_sessions/cockpit/src/recovery.rs",
+      "sha256": "23539583ea35d263eba31491bca7c881cb7521268c7d5a6c35d648ab44daacce"
+    },
+    "src/restore.rs": {
+      "original": "cc_sessions/cockpit/src/restore.rs",
+      "sha256": "07b3eca6d1bd4f69e5c3741f4064a2348073b9277aad946fba01b5dfb3faedf4"
+    },
+    "src/review.rs": {
+      "original": "cc_sessions/cockpit/src/review.rs",
+      "sha256": "bc051435a319cf2a4b51478c45cb8935f659e34d514b63e6d737ecd436f7574e"
+    },
+    "src/runtime.rs": {
+      "original": "cc_sessions/cockpit/src/runtime.rs",
+      "sha256": "cc2557ec6d95064f1d9c23779654a0c1455fffe0474fb42016181db97602f18b"
+    },
+    "src/session_registry.rs": {
+      "original": "cc_sessions/cockpit/src/session_registry.rs",
+      "sha256": "c47a8279a9b190255cccaddfb7a5d26974bad13087dd5bd8f3e01c6fa0f56f50"
+    },
+    "src/status.rs": {
+      "original": "cc_sessions/cockpit/src/status.rs",
+      "sha256": "25dd139a179270051b8d208448628d375f5567ad438e317cabda6d89cad33d6e"
+    },
+    "src/tmux.rs": {
+      "original": "cc_sessions/cockpit/src/tmux.rs",
+      "sha256": "8e1643ec22541bec65a89f0fa5619ac4b182bf7fc9512ca28de404bbcec45d0a"
+    },
+    "src/ui.rs": {
+      "original": "cc_sessions/cockpit/src/ui.rs",
+      "sha256": "716a1a0e30408852931f3bbf992d9645d416e71b514c48f4b0ceda4980262e52"
+    }
+  }
+}
