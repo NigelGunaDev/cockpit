@@ -1,6 +1,6 @@
-//! One transient worker per cockpit; the existing installed CLI owns process operations.
+//! One transient worker per cockpit; bundled native operations own process recovery.
 use crate::{
-    actions,
+    backend,
     model::{Run, Target},
     session_registry::{self, Entry, Registry},
 };
@@ -54,7 +54,7 @@ pub fn scope_matches(entry: &Entry, projects: &[String]) -> bool {
             })
         })
 }
-pub fn cli_for(entry: &Entry, projects: &[String]) -> Option<String> {
+pub fn project_for(entry: &Entry, projects: &[String]) -> Option<String> {
     let repo = entry.snapshot.repository.as_ref()?;
     projects
         .iter()
@@ -145,24 +145,15 @@ fn perform(work: Work) -> Job {
         if current.revision != work.entry.revision || (!current.enabled && work.close.is_none()) {
             return Err("Saved intent changed; refresh before retrying".into());
         }
-        let cli = cli_for(&current, &work.projects)
-            .ok_or("No matching installed project; update its CLI installation")?;
+        let project = project_for(&current, &work.projects)
+            .ok_or("No matching saved Git project is available")?;
         let args = arguments(&current, &work.socket, work.close.as_ref())?;
         if work.close.is_some() {
             Registry::open(Path::new(&work.path))?.forget(&id, current.revision)?;
             forgotten = true;
         }
-        // No registry transaction is held while the CLI creates or closes a process.
-        let result = actions::execute(
-            &cli,
-            &cli,
-            &args,
-            if work.close.is_some() {
-                "CloseSession"
-            } else {
-                "RestoreSession"
-            },
-        )?;
+        // No registry transaction is held while the native helper creates or closes a process.
+        let result = backend::execute(&project, &args)?;
         let value = result.structured;
         job.status = value["outcome"]
             .as_str()
@@ -196,7 +187,7 @@ fn perform(work: Work) -> Job {
                         .canonicalize()
                         .ok()
             {
-                return Err("CLI returned a foreign terminal".into());
+                return Err("Native helper returned a foreign terminal".into());
             }
             crate::observe::validate(target, false)?;
             let _ = arguments(&current, &work.socket, None)?;
@@ -312,7 +303,7 @@ mod tests {
         let args = arguments(&record, "/tmp/custom.sock", None).unwrap();
         assert!(args.windows(2).any(|p| p == ["--session-id", "custom-id"]));
         assert!(!args.iter().any(|a| a == "new" || a == "--last"));
-        assert!(cli_for(&record, &[dir.to_string_lossy().into()]).is_some());
+        assert!(project_for(&record, &[dir.to_string_lossy().into()]).is_some());
         assert!(socket_matches(&record, "/tmp/original.sock"));
         assert!(!socket_matches(&record, "/tmp/other.sock"));
         record.snapshot.repository.as_mut().unwrap().branch = Some("other".into());

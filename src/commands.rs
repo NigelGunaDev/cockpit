@@ -163,46 +163,6 @@ pub const COMMANDS: &[Command] = &[
         Dispatch::Panel("changes")
     ),
     command!(
-        "saved-history",
-        "Saved conversation history",
-        "logs transcript tool events",
-        ["H"],
-        "Saved conversations/logs; f find, Tab tool events.",
-        Dispatch::Panel("saved-history")
-    ),
-    command!(
-        "review",
-        "Review task",
-        "completed archived outcome findings verification diff",
-        ["R"],
-        "Inspect retained task evidence, changes and history; live terminal optional.",
-        Dispatch::Panel("review")
-    ),
-    command!(
-        "attention",
-        "Attention inbox",
-        "questions permissions notifications needs you",
-        ["i"],
-        "Search/filter items; n selects next unresolved, o opens view-only.",
-        Dispatch::Panel("attention")
-    ),
-    command!(
-        "queue",
-        "Task queue",
-        "pending startup details",
-        ["q"],
-        "Existing protocols own task actions.",
-        Dispatch::Panel("queue")
-    ),
-    command!(
-        "create",
-        "Create task",
-        "new request project",
-        ["n"],
-        "Open the creation form; submission uses the existing launcher.",
-        Dispatch::Panel("create")
-    ),
-    command!(
         "remove",
         "Remove cockpit tile",
         "unpin close",
@@ -363,6 +323,9 @@ mod tests {
 
     #[test]
     fn definitions_have_unique_ids_keys_and_searchable_actions() {
+        for retired in ["queue", "create", "review", "attention", "saved-history"] {
+            assert!(get(retired).is_err());
+        }
         let mut ids = HashSet::new();
         let mut keys = HashSet::new();
         for command in COMMANDS {
@@ -373,9 +336,9 @@ mod tests {
         }
         for (query, id) in [
             ("history", "history"),
-            ("create", "create"),
+            ("remember", "session-memory"),
             ("split", "split"),
-            ("inbox", "attention"),
+            ("changes", "changes"),
         ] {
             assert!(matching(query).iter().any(|command| command.id == id));
         }
@@ -384,8 +347,8 @@ mod tests {
             "Ctrl+a then Space"
         );
         assert_eq!(
-            shortcut(get("saved-history").unwrap(), "C-]"),
-            "Ctrl+] then Shift+H"
+            shortcut(get("session-memory").unwrap(), "C-]"),
+            "Ctrl+] then o"
         );
     }
 

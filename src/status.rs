@@ -29,9 +29,6 @@ fn clip(text: &str, columns: usize) -> String {
 pub const NAVIGATION: &[(&str, &str)] = &[
     ("sessions", "Sessions"),
     ("palette", "Commands"),
-    ("queue", "Tasks"),
-    ("attention", "Attention"),
-    ("review", "Review"),
     ("help", "Help"),
 ];
 
@@ -68,9 +65,9 @@ pub fn navigation(run: &Run, columns: usize) -> String {
     let items = if columns >= full {
         NAVIGATION.to_vec()
     } else if columns >= 29 {
-        vec![NAVIGATION[0], NAVIGATION[1], NAVIGATION[5]]
+        vec![NAVIGATION[0], NAVIGATION[1], NAVIGATION[2]]
     } else {
-        vec![NAVIGATION[0], NAVIGATION[5]]
+        vec![NAVIGATION[0], NAVIGATION[2]]
     };
     let mut text = String::new();
     let mut used = 0;
@@ -105,11 +102,6 @@ pub fn navigation(run: &Run, columns: usize) -> String {
 }
 
 pub fn line(run: &Run, columns: usize) -> String {
-    let (unresolved, unacknowledged) = attention::counts(&run.attention);
-    let incomplete = run
-        .attention
-        .iter()
-        .any(|s| !s.complete || s.next_before.is_some() || s.before.is_some());
     let disconnected = run
         .tiles
         .iter()
@@ -120,27 +112,7 @@ pub fn line(run: &Run, columns: usize) -> String {
     } else {
         "Read only"
     };
-    let compact = |count: usize| {
-        if count > 999 {
-            "999+".into()
-        } else {
-            count.to_string()
-        }
-    };
-    let counts = if columns >= 80 {
-        format!(
-            "attention {unresolved} ({unacknowledged} unack){}",
-            if incomplete { "*" } else { "" }
-        )
-    } else {
-        format!(
-            "A:{}/{}{}",
-            compact(unresolved),
-            compact(unacknowledged),
-            if incomplete { "*" } else { "" }
-        )
-    };
-    let essential = format!("{mode} | {counts}");
+    let essential = mode.to_owned();
     if width(&essential) >= columns {
         return clip(&essential, columns);
     }
@@ -252,7 +224,7 @@ mod tests {
         assert!(navigation(&run, 120).contains("Ctrl+a then ?"));
     }
     #[test]
-    fn mode_and_attention_fit_before_long_unicode_context() {
+    fn input_mode_fits_before_long_unicode_context() {
         let mut run = crate::navigation::fixture();
         run.control = true;
         run.message = "長いメッセージ ".repeat(100);
@@ -260,11 +232,6 @@ mod tests {
             let text = line(&run, columns);
             assert!(width(&text) <= columns, "{columns}: {text}");
             assert!(text.starts_with("Input enabled"));
-            assert!(text.contains(if columns >= 80 {
-                "attention 0"
-            } else {
-                "A:0/0"
-            }));
         }
         run.control = false;
         assert!(line(&run, 80).starts_with("Read only"));
@@ -272,16 +239,12 @@ mod tests {
     }
 
     #[test]
-    fn partial_attention_and_actual_leader_are_visible() {
+    fn actual_leader_and_read_only_mode_are_visible() {
         let mut run = crate::navigation::fixture();
         run.leader = "C-a".into();
-        let mut inbox = crate::model::AttentionSnapshot::default();
-        inbox.counts.unresolved = 7;
-        inbox.counts.unacknowledged = 3;
-        run.attention.push(inbox);
-        assert!(line(&run, 80).contains("attention 7 (3 unack)*"));
+        assert!(line(&run, 80).starts_with("Read only"));
         assert!(line(&run, 80).contains("C-a ?"));
-        assert!(line(&run, 40).contains("A:7/3*"));
+        assert!(line(&run, 40).contains("C-a ?"));
     }
 
     #[test]

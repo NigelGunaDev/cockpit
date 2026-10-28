@@ -1,12 +1,10 @@
-mod actions;
 mod agents;
 mod attention;
+mod backend;
 mod changes;
 mod commands;
 mod help;
-mod history;
 mod interaction;
-mod key_hints;
 mod layout;
 mod model;
 mod navigation;
@@ -14,10 +12,8 @@ mod observe;
 mod palette;
 mod preferences;
 mod presentation;
-mod queue;
 mod recovery;
 mod restore;
-mod review;
 mod runtime;
 mod session_registry;
 mod status;
@@ -63,7 +59,7 @@ fn run() -> Result<(), String> {
             );
         }
         println!(
-            "\nPicker: Enter focus/replace, a add tile, / fuzzy search.\nOpening the cockpit starts no task. Explicit task controls use the existing CLI."
+            "\nPicker: Enter focus/replace, a add tile, / fuzzy search.\nOpening the cockpit starts no task. Existing tmux sessions remain owned by their original server."
         );
         return Ok(());
     }
@@ -190,7 +186,7 @@ fn run() -> Result<(), String> {
     if !explicit_projects {
         let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
         if let Ok(root) = observe::discover_project(&cwd).or_else(|_| {
-            std::env::var("CLAUDE_PROJECT_DIR")
+            std::env::var("COCKPIT_PROJECT_DIR")
                 .map_err(|e| e.to_string())
                 .and_then(|p| observe::discover_project(Path::new(&p)))
         }) {
@@ -210,7 +206,7 @@ fn run() -> Result<(), String> {
                         .into()
                 });
                 if !projects.contains(&root)
-                    && restore::cli_for(e, std::slice::from_ref(&root)).is_some()
+                    && restore::project_for(e, std::slice::from_ref(&root)).is_some()
                     && observe::discover_project(Path::new(&root)).is_ok()
                     && !projects.contains(&root)
                 {
@@ -220,7 +216,7 @@ fn run() -> Result<(), String> {
         }
     }
     if projects.is_empty() {
-        return Err("No installed project found. Pass --project PATH; remembered projects must still exist.".into());
+        return Err("No project directory found. Pass --project PATH; remembered projects must still exist.".into());
     }
     let mut targets = match observe::targets(&socket) {
         Ok(targets) => targets,

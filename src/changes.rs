@@ -45,10 +45,6 @@ pub enum Scope {
         reference: String,
         base: String,
     },
-    Commits {
-        base: String,
-        head: String,
-    },
 }
 
 impl Scope {
@@ -59,11 +55,6 @@ impl Scope {
             Self::Compare { reference, base } => format!(
                 "Working tree vs merge-base of {reference} ({})",
                 &base[..12.min(base.len())]
-            ),
-            Self::Commits { base, head } => format!(
-                "Pinned commits {} → {}",
-                &base[..12.min(base.len())],
-                &head[..12.min(head.len())]
             ),
         }
     }
@@ -138,46 +129,16 @@ fn repository(cwd: &Path) -> Result<Repository, String> {
     })
 }
 
-pub fn task_repository(root: &Path, expected: Option<&Repository>) -> Result<Repository, String> {
+pub fn exact_repository(root: &Path, expected: Option<&Repository>) -> Result<Repository, String> {
     let repo = repository(root)?;
     if repo.root != root.canonicalize().map_err(|e| e.to_string())?
         || expected.is_some_and(|old| old != &repo)
     {
-        return Err("Task repository moved or was replaced; refresh and select it again".into());
+        return Err(
+            "Selected repository moved or was replaced; refresh and select it again".into(),
+        );
     }
     Ok(repo)
-}
-
-pub fn task_scope(repo: &Repository, branch: &str, base: &str) -> Result<Scope, String> {
-    let head = git_text(
-        &repo.root,
-        &[
-            "rev-parse",
-            "--verify",
-            "--end-of-options",
-            &format!("refs/heads/{branch}^{{commit}}"),
-        ],
-    )?;
-    let base = git_text(
-        &repo.root,
-        &[
-            "rev-parse",
-            "--verify",
-            "--end-of-options",
-            &format!("{base}^{{commit}}"),
-        ],
-    )?;
-    let base = git_text(&repo.root, &["merge-base", &base, &head])?;
-    Ok(Scope::Commits { base, head })
-}
-
-pub fn on_task_branch(repo: &Repository, branch: &str) -> bool {
-    git_text(&repo.root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
-        .is_ok_and(|current| current == branch)
-}
-
-pub fn current_head(repo: &Repository) -> Result<String, String> {
-    git_text(&repo.root, &["rev-parse", "--verify", "HEAD"])
 }
 
 pub fn selected_repository(
@@ -258,20 +219,16 @@ pub fn comparison(repo: &Repository, reference: &str) -> Result<Scope, String> {
 }
 
 pub fn snapshot(repo: Repository, scope: &Scope) -> Result<Snapshot, String> {
-    task_repository(&repo.root, Some(&repo))?;
-    let mut files = if matches!(scope, Scope::Commits { .. }) {
-        vec![]
-    } else {
-        status_files(&git(
-            &repo.root,
-            &[
-                "status".as_ref(),
-                "--porcelain=v1".as_ref(),
-                "-z".as_ref(),
-                "--untracked-files=all".as_ref(),
-            ],
-        )?)?
-    };
+    exact_repository(&repo.root, Some(&repo))?;
+    let mut files = status_files(&git(
+        &repo.root,
+        &[
+            "status".as_ref(),
+            "--porcelain=v1".as_ref(),
+            "-z".as_ref(),
+            "--untracked-files=all".as_ref(),
+        ],
+    )?)?;
     match scope {
         Scope::Working => {}
         Scope::Staged => files.retain(|f| f.status != "??" && !f.status.starts_with(' ')),
@@ -292,22 +249,6 @@ pub fn snapshot(repo: Repository, scope: &Scope) -> Result<Snapshot, String> {
             )?)?;
             files.extend(untracked);
         }
-        Scope::Commits { base, head } => {
-            files = compared_files(&git(
-                &repo.root,
-                &[
-                    "diff".as_ref(),
-                    "--name-status".as_ref(),
-                    "-z".as_ref(),
-                    "--no-renames".as_ref(),
-                    "--no-ext-diff".as_ref(),
-                    "--no-textconv".as_ref(),
-                    base.as_ref(),
-                    head.as_ref(),
-                    "--".as_ref(),
-                ],
-            )?)?;
-        }
     }
     let warning = if files.len() > MAX_FILES {
         format!("Showing first {MAX_FILES} files; use Git for the full list.")
@@ -326,7 +267,7 @@ pub fn snapshot(repo: Repository, scope: &Scope) -> Result<Snapshot, String> {
 }
 
 pub fn detail(snapshot: &Snapshot, scope: &Scope, index: usize) -> Result<String, String> {
-    task_repository(&snapshot.repository.root, Some(&snapshot.repository))?;
+    exact_repository(&snapshot.repository.root, Some(&snapshot.repository))?;
     if scope != &snapshot.scope {
         return Err("Git comparison changed; refresh before reading a file".into());
     }
@@ -407,10 +348,6 @@ pub fn detail(snapshot: &Snapshot, scope: &Scope, index: usize) -> Result<String
         }
         Scope::Staged => args.push("--cached".as_ref()),
         Scope::Compare { base, .. } => args.push(base.as_ref()),
-        Scope::Commits { base, head } => {
-            args.push(base.as_ref());
-            args.push(head.as_ref());
-        }
     }
     args.push("--".as_ref());
     args.push(file.path.as_os_str());
@@ -750,50 +687,18 @@ mod tests {
     }
 
     #[test]
-    fn task_commit_comparison_is_pinned_and_does_not_include_uncommitted_work() {
-        let f = Fixture::new(true);
-        let base = f.git(&["rev-parse", "HEAD"]);
-        f.git(&["checkout", "-qb", "feature/review"]);
-        fs::write(f.0.join("tracked.txt"), "review-commit-marker\n").unwrap();
-        f.git(&["add", "tracked.txt"]);
-        f.git(&["commit", "-qm", "review work"]);
-        let scope = task_scope(&f.repo(), "feature/review", &base).unwrap();
-        fs::write(f.0.join("tracked.txt"), "uncommitted-marker\n").unwrap();
-        let index = fs::read(f.0.join(".git/index")).unwrap();
-        let captured = snapshot(f.repo(), &scope).unwrap();
-        let diff = detail(&captured, &scope, 0).unwrap();
-        assert!(diff.contains("+review-commit-marker"));
-        assert!(!diff.contains("+uncommitted-marker"));
-        assert_eq!(fs::read(f.0.join(".git/index")).unwrap(), index);
-        assert_eq!(
-            fs::read_to_string(f.0.join("tracked.txt")).unwrap(),
-            "uncommitted-marker\n"
-        );
-        f.git(&["add", "tracked.txt"]);
-        f.git(&["commit", "-qm", "later work"]);
-        assert_ne!(
-            task_scope(&f.repo(), "feature/review", &base).unwrap(),
-            scope
-        );
-        assert_eq!(detail(&captured, &scope, 0).unwrap(), diff);
-        assert!(detail(&captured, &Scope::Working, 0).is_err());
-        assert!(task_scope(&f.repo(), "missing-branch", &base).is_err());
-        assert!(task_scope(&f.repo(), "feature/review", "--help").is_err());
-    }
-
-    #[test]
-    fn task_repository_rejects_a_parent_and_a_replacement_at_the_same_path() {
+    fn exact_repository_rejects_a_parent_and_a_replacement_at_the_same_path() {
         let f = Fixture::new(true);
         fs::create_dir(f.0.join("nested")).unwrap();
-        assert!(task_repository(&f.0.join("nested"), None).is_err());
-        let expected = task_repository(&f.0, None).unwrap();
+        assert!(exact_repository(&f.0.join("nested"), None).is_err());
+        let expected = exact_repository(&f.0, None).unwrap();
         let moved = f.0.with_extension("old-review");
         fs::rename(&f.0, &moved).unwrap();
         fs::create_dir(&f.0).unwrap();
         let mut init = Command::new("git");
         init.args(["init", "-q"]).current_dir(&f.0);
         assert!(init.status().unwrap().success());
-        assert!(task_repository(&f.0, Some(&expected)).is_err());
+        assert!(exact_repository(&f.0, Some(&expected)).is_err());
         fs::remove_dir_all(moved).unwrap();
     }
 

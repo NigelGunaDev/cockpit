@@ -2,8 +2,8 @@ use std::{collections::HashSet, io, path::Path, time::Duration};
 
 use crossterm::{
     event::{
-        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+        self, DisableBracketedPaste, DisableMouseCapture, EnableMouseCapture, Event, KeyCode,
+        KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -20,7 +20,7 @@ use ratatui::{
 use crate::{
     attention,
     interaction::{self, Hits},
-    model::{AttentionItem, Run},
+    model::Run,
     observe, presentation, runtime,
     tmux::Tmux,
 };
@@ -604,333 +604,6 @@ fn draw_picker(frame: &mut Frame, run: &Run, picker: &Picker, message: &str) -> 
     hits
 }
 
-#[derive(Default)]
-struct Inbox {
-    selected: Option<String>,
-    include_resolved: bool,
-    confirming: bool,
-    detail_offset: usize,
-    query: String,
-    searching: bool,
-    project: Option<String>,
-    kind: usize,
-    receipt_filter: usize,
-    initialized: bool,
-}
-
-impl Inbox {
-    fn kind_label(&self) -> &'static str {
-        [
-            "all types",
-            "permissions",
-            "questions",
-            "failures",
-            "reviews",
-            "other",
-        ][self.kind]
-    }
-    fn receipt_label(&self) -> &'static str {
-        if self.include_resolved {
-            "all receipts"
-        } else {
-            ["unresolved", "unacknowledged", "unseen"][self.receipt_filter]
-        }
-    }
-    fn kind_of(item: &AttentionItem) -> usize {
-        match item.kind.as_str() {
-            "permission_prompt" | "permission" => 1,
-            "elicitation_dialog" | "question" => 2,
-            "stop_hook_failed" | "failure" | "failed" | "error" => 3,
-            "pr_open" | "review" | "ready_for_review" => 4,
-            _ => 5,
-        }
-    }
-    fn items<'a>(&self, run: &'a Run) -> Vec<&'a AttentionItem> {
-        let mut items: Vec<_> = run
-            .attention
-            .iter()
-            .flat_map(|inbox| &inbox.items)
-            .filter(|item| self.include_resolved || item.resolved_at.is_none())
-            .filter(|item| {
-                self.project
-                    .as_ref()
-                    .is_none_or(|project| project == &item.project)
-            })
-            .filter(|item| self.kind == 0 || self.kind == Self::kind_of(item))
-            .filter(|item| {
-                self.include_resolved
-                    || match self.receipt_filter {
-                        1 => item.acknowledged_at.is_none(),
-                        2 => item.seen_at.is_none(),
-                        _ => true,
-                    }
-            })
-            .filter(|item| {
-                crate::navigation::match_score(
-                    &self.query,
-                    &[
-                        &item.id,
-                        &item.project,
-                        &item.kind,
-                        item.task.as_deref().unwrap_or(""),
-                        item.workspace_root.as_deref().unwrap_or(""),
-                        item.reason.as_deref().unwrap_or(""),
-                        item.message.as_deref().unwrap_or(""),
-                        item.session_id.as_deref().unwrap_or(""),
-                    ],
-                )
-                .is_some()
-            })
-            .collect();
-        items.sort_by(|a, b| {
-            a.resolved_at
-                .is_some()
-                .cmp(&b.resolved_at.is_some())
-                .then_with(|| {
-                    a.acknowledged_at
-                        .is_some()
-                        .cmp(&b.acknowledged_at.is_some())
-                })
-                .then_with(|| b.ts.cmp(&a.ts))
-                .then_with(|| (&a.project, &a.id).cmp(&(&b.project, &b.id)))
-        });
-        items
-    }
-    fn index(&self, run: &Run) -> usize {
-        self.items(run)
-            .iter()
-            .position(|item| Some(attention::token(item)) == self.selected)
-            .unwrap_or(0)
-    }
-    fn select(&mut self, run: &Run, delta: isize) {
-        let items = self.items(run);
-        if items.is_empty() {
-            self.selected = None;
-            return;
-        }
-        let next = self
-            .index(run)
-            .saturating_add_signed(delta)
-            .min(items.len() - 1);
-        self.selected = Some(attention::token(items[next]));
-        self.detail_offset = 0;
-        self.confirming = false;
-    }
-    fn reconcile(&mut self, run: &Run) {
-        if !self.initialized {
-            self.select(run, 0);
-            self.initialized = true;
-        } else if !self
-            .items(run)
-            .iter()
-            .any(|item| Some(attention::token(item)) == self.selected)
-        {
-            self.selected = None;
-            self.confirming = false;
-            self.detail_offset = 0;
-        }
-    }
-    fn next_unresolved(&mut self, run: &Run) {
-        let items = self.items(run);
-        let start = self
-            .selected
-            .as_ref()
-            .and_then(|key| items.iter().position(|item| attention::token(item) == *key))
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        let selected = (0..items.len())
-            .map(|i| items[(start + i) % items.len()])
-            .find(|item| item.resolved_at.is_none())
-            .map(attention::token);
-        self.selected = selected;
-        self.detail_offset = 0;
-        self.confirming = false;
-    }
-    fn cycle_project(&mut self, run: &Run) {
-        let mut projects: Vec<_> = run
-            .attention
-            .iter()
-            .map(|page| page.project.clone())
-            .collect();
-        projects.sort();
-        projects.dedup();
-        self.project = match self
-            .project
-            .as_ref()
-            .and_then(|key| projects.iter().position(|p| p == key))
-        {
-            Some(index) => projects.get(index + 1).cloned(),
-            None => projects.first().cloned(),
-        };
-        self.selected = None;
-        self.select(run, 0);
-    }
-}
-
-#[derive(Clone)]
-enum InboxHit {
-    Search,
-    Item(String),
-    Details,
-}
-
-fn draw_attention(frame: &mut Frame, run: &Run, inbox: &Inbox, message: &str) -> Hits<InboxHit> {
-    let mut hits = Hits::new(frame.area());
-    let areas = Layout::vertical([
-        Constraint::Length(4),
-        Constraint::Percentage(40),
-        Constraint::Min(3),
-        Constraint::Length(6),
-    ])
-    .split(presentation::body(frame.area()));
-    let items = inbox.items(run);
-    let (unresolved, unacknowledged) = attention::counts(&run.attention);
-    frame.render_widget(
-        Paragraph::new(sanitize_history(&format!(
-            "{} · {} · {} loaded matches\nProject: {} · p cycles; ] older / [ latest",
-            if inbox.searching {
-                format!("Search: {}", inbox.query)
-            } else {
-                format!("/ {} · t {}", inbox.query, inbox.kind_label())
-            },
-            inbox.receipt_label(),
-            items.len(),
-            inbox
-                .project
-                .as_deref()
-                .unwrap_or("all projects (select one to page)")
-        )))
-        .wrap(Wrap { trim: false })
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Inbox filters"),
-        ),
-        areas[0],
-    );
-    hits.add(areas[0], InboxHit::Search);
-    let list = items
-        .iter()
-        .map(|item| {
-            ListItem::new(
-                format!(
-                    "[{}] {} · {} · {}",
-                    if item.resolved_at.is_some() {
-                        "resolved"
-                    } else if item.acknowledged_at.is_some() {
-                        "acknowledged; unresolved"
-                    } else if item.seen_at.is_some() {
-                        "seen; unresolved"
-                    } else {
-                        "new"
-                    },
-                    observe::sanitize(
-                        item.task
-                            .as_deref()
-                            .or(item.workspace.as_deref())
-                            .unwrap_or("session")
-                    ),
-                    observe::sanitize(&item.kind),
-                    observe::sanitize(&item.ts)
-                )
-                .replace('\n', " "),
-            )
-        })
-        .collect::<Vec<_>>();
-    let mut state = ListState::default();
-    state.select(
-        items
-            .iter()
-            .position(|item| Some(attention::token(item)) == inbox.selected),
-    );
-    frame.render_stateful_widget(
-        List::new(list)
-            .block(Block::default().borders(Borders::ALL).title(format!(
-                "Attention — {unresolved} unresolved / {unacknowledged} unacknowledged"
-            )))
-            .highlight_style(presentation::selected()),
-        areas[1],
-        &mut state,
-    );
-    hits.list(
-        Block::default().borders(Borders::ALL).inner(areas[1]),
-        state.offset(),
-        &items
-            .iter()
-            .map(|item| (1, InboxHit::Item(attention::token(item))))
-            .collect::<Vec<_>>(),
-    );
-    hits.add(areas[2], InboxHit::Details);
-    let warnings = run.attention.iter().flat_map(|inbox| {
-        let mut warnings = inbox.errors.iter().map(|error| format!("Warning: {}", error.get("message").and_then(|value| value.as_str()).unwrap_or("Observation incomplete"))).collect::<Vec<_>>();
-        if inbox.next_before.is_some() { warnings.push(format!("{}: older items remain; p selects project, ] loads older.", inbox.project)); }
-        if inbox.before.is_some() { warnings.push(format!("{}: older page; [ returns to latest. Counts cover the journal, filters cover loaded pages.", inbox.project)); }
-        warnings
-    }).collect::<Vec<_>>().join("\n");
-    let detail = match items
-        .iter()
-        .find(|item| Some(attention::token(item)) == inbox.selected)
-    {
-        Some(item) => format!(
-            "{}\nProject: {}\nTask: {} · Claude: {}\nEvidence: {} · {}\n{}\n\n{}\n\nSeen: {}\nAcknowledged: {}\nMarked resolved: {}\n{}",
-            item.reason.as_deref().unwrap_or(&item.kind),
-            item.project,
-            item.task.as_deref().unwrap_or("unassociated"),
-            item.session_id.as_deref().unwrap_or("unknown"),
-            item.source.as_deref().unwrap_or("legacy needs-you record"),
-            item.ts,
-            item.id,
-            item.message.as_deref().unwrap_or(""),
-            item.seen_at.as_deref().unwrap_or("no"),
-            item.acknowledged_at.as_deref().unwrap_or("no"),
-            item.resolved_at.as_deref().unwrap_or("no"),
-            format_args!(
-                "{}\n{warnings}",
-                match attention::matching_target(item, run) {
-                    Ok(target) => format!(
-                        "o opens {} VIEW ONLY. Seen/acknowledged/resolved are receipts, not an answer or approval.",
-                        target.session_name
-                    ),
-                    Err(error) =>
-                        format!("Terminal unavailable: {error}. Item stays in the inbox."),
-                }
-            )
-        ),
-        None => format!(
-            "{}\n{warnings}\n\nStatus requires observational hooks; session presence alone means activity unknown.",
-            if items.is_empty() {
-                "No items in this view. Change filters, include history with h, or load another page."
-            } else {
-                "Choose an item with arrows, n, or a click. / searches; h includes resolved history."
-            }
-        ),
-    };
-    frame.render_widget(
-        Paragraph::new(sanitize_history(&detail))
-            .wrap(Wrap { trim: false })
-            .scroll((inbox.detail_offset.min(u16::MAX as usize) as u16, 0))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Evidence and receipts"),
-            ),
-        areas[2],
-    );
-    let footer = if inbox.confirming {
-        "Mark this item resolved? Enter confirms; any other key cancels. This does not answer Claude or approve work."
-    } else {
-        "↑/↓ j/k select · n next unresolved · / search · t type · v receipts · p project · ] older · [ latest\nEnter seen · a acknowledge · r resolve · u reopen · o view terminal · h history · f refresh · PgUp/Dn · Esc close"
-    };
-    frame.render_widget(
-        Paragraph::new(format!("{footer}\n{}", sanitize_history(message)))
-            .wrap(Wrap { trim: false }),
-        areas[3],
-    );
-    hits
-}
-
-/// History is plain panel text, never a live terminal stream. Strip control
-/// sequences so captured text cannot invoke host-terminal behavior.
 pub(crate) fn sanitize_history(text: &str) -> String {
     #[derive(Clone, Copy)]
     enum State {
@@ -1016,6 +689,21 @@ fn draw_history(frame: &mut Frame, text: &str, offset: usize, message: &str) {
 }
 
 pub fn run(role: &str, path: &Path) -> Result<(), String> {
+    if ![
+        "home",
+        "sessions",
+        "sidebar",
+        "disconnected",
+        "palette",
+        "history",
+        "changes",
+        "help",
+        "session-memory",
+    ]
+    .contains(&role)
+    {
+        return Err("This panel is not part of the standalone terminal workspace".into());
+    }
     if role == "session-memory" {
         return crate::recovery::panel(path);
     }
@@ -1025,26 +713,15 @@ pub fn run(role: &str, path: &Path) -> Result<(), String> {
             None => Ok(()),
         };
     }
-    if role == "saved-history" {
-        return crate::history::panel(path);
-    }
     if role == "changes" {
         return crate::changes::panel(path);
-    }
-    if role == "review" {
-        return crate::review::panel(path, None);
-    }
-    if role == "queue" || role == "create" {
-        return crate::queue::run(role, path);
     }
     let mut observed = runtime::read_run(path)?;
     let history = role == "history";
     let disconnected = role == "disconnected";
-    let attention_panel = role == "attention";
     let help_panel = role == "help";
     let mut help = crate::help::Help::default();
     let mut chrome = crate::presentation::Chrome::default();
-    let mut inbox = Inbox::default();
     // History captures stay bound to the original tile while other tiles focus.
     let history_run = observed.clone();
     let sidebar = role == "sidebar";
@@ -1069,16 +746,13 @@ pub fn run(role: &str, path: &Path) -> Result<(), String> {
     } else {
         String::new()
     };
-    let mut inbox_hits = Hits::new(ratatui::layout::Rect::default());
     let mut picker_hits = Hits::new(ratatui::layout::Rect::default());
     let mut offset = captured.lines().count().saturating_sub(20);
     let _restore = Restore;
     enable_raw_mode().map_err(|error| error.to_string())?;
     execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)
         .map_err(|error| error.to_string())?;
-    if attention_panel {
-        execute!(io::stdout(), EnableBracketedPaste).map_err(|e| e.to_string())?;
-    }
+
     let mut terminal =
         Terminal::new(CrosstermBackend::new(io::stdout())).map_err(|error| error.to_string())?;
     terminal.clear().map_err(|error| error.to_string())?;
@@ -1094,15 +768,6 @@ pub fn run(role: &str, path: &Path) -> Result<(), String> {
             .saturating_sub(if history { 5 } else { 4 }) as usize;
         if history {
             offset = offset.min(captured.lines().count().saturating_sub(rows));
-        } else if attention_panel {
-            let selected = inbox.selected.clone();
-            inbox.reconcile(&observed);
-            if selected.is_some() && inbox.selected.is_none() {
-                message = format!(
-                    "{}\nSelection changed or left this view. Choose an item explicitly before another action.",
-                    message.lines().next().unwrap_or("")
-                );
-            }
         } else {
             picker.reconcile(&observed);
         }
@@ -1116,15 +781,13 @@ pub fn run(role: &str, path: &Path) -> Result<(), String> {
                     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), frame.area());
                 } else if help_panel {
                     help.draw(frame, &observed.leader);
-                } else if attention_panel {
-                    inbox_hits = draw_attention(frame, &observed, &inbox, &message);
                 } else if history {
                     draw_history(frame, &captured, offset, &message);
                 } else {
                     picker_hits = draw_picker(frame, &observed, &picker, &message);
                 }
                 if !disconnected {
-                    chrome.draw(frame, if help_panel { "Cockpit controls · Help" } else if attention_panel { "Attention" } else if history { "Terminal history · Read only" } else { "Sessions" });
+                    chrome.draw(frame, if help_panel { "Cockpit controls · Help" } else if history { "Terminal history · Read only" } else { "Sessions" });
                 }
             })
             .map_err(|error| error.to_string())?;
@@ -1145,32 +808,7 @@ pub fn run(role: &str, path: &Path) -> Result<(), String> {
             return Ok(());
         }
         if let Event::Mouse(mouse) = input {
-            if attention_panel {
-                let size = terminal.size().map_err(|e| e.to_string())?;
-                let current = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                if inbox_hits.frame != current {
-                    continue;
-                }
-                if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                    inbox.confirming = false;
-                    match inbox_hits.get(mouse, current) {
-                        Some(InboxHit::Item(key)) => {
-                            inbox.selected = Some(key.clone());
-                            inbox.detail_offset = 0;
-                            inbox.searching = false;
-                        }
-                        Some(InboxHit::Search) => inbox.searching = true,
-                        _ => {}
-                    }
-                } else if let Some(delta) = interaction::wheel(mouse.kind) {
-                    inbox.confirming = false;
-                    if matches!(inbox_hits.get(mouse, current), Some(InboxHit::Details)) {
-                        inbox.detail_offset = inbox.detail_offset.saturating_add_signed(delta);
-                    } else {
-                        inbox.select(&observed, delta);
-                    }
-                }
-            } else if !history && !help_panel && !disconnected {
+            if !history && !help_panel && !disconnected {
                 let size = terminal.size().map_err(|e| e.to_string())?;
                 let current = ratatui::layout::Rect::new(0, 0, size.width, size.height);
                 if picker_hits.frame != current {
@@ -1220,21 +858,7 @@ pub fn run(role: &str, path: &Path) -> Result<(), String> {
             }
             continue;
         }
-        if let Event::Paste(text) = &input {
-            if attention_panel {
-                inbox.confirming = false;
-            }
-            if attention_panel && inbox.searching {
-                for ch in text.chars().filter(|ch| !ch.is_control()) {
-                    if inbox.query.chars().count() >= 256 {
-                        break;
-                    }
-                    inbox.query.push(ch);
-                }
-                inbox.select(&observed, 0);
-            }
-            continue;
-        }
+
         let Event::Key(key) = input else {
             continue;
         };
@@ -1244,40 +868,8 @@ pub fn run(role: &str, path: &Path) -> Result<(), String> {
         if key.kind == KeyEventKind::Release {
             continue;
         }
-        if attention_panel && inbox.searching {
-            match key.code {
-                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    inbox.query.clear();
-                    inbox.select(&observed, 0);
-                }
-                KeyCode::Esc | KeyCode::Enter => inbox.searching = false,
-                KeyCode::Backspace => {
-                    inbox.query.pop();
-                    inbox.select(&observed, 0);
-                }
-                KeyCode::Char(ch)
-                    if !key
-                        .modifiers
-                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-                {
-                    if inbox.query.chars().count() < 256 {
-                        inbox.query.push(ch);
-                    }
-                    inbox.select(&observed, 0);
-                }
-                _ => {}
-            }
-            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-                return Ok(());
-            }
-            continue;
-        }
-        if key.code == KeyCode::Esc
-            && !history
-            && !attention_panel
-            && !help_panel
-            && picker.finish_search()
-        {
+
+        if key.code == KeyCode::Esc && !history && !help_panel && picker.finish_search() {
             continue;
         }
         if key.code == KeyCode::Esc
@@ -1295,128 +887,7 @@ pub fn run(role: &str, path: &Path) -> Result<(), String> {
             );
             continue;
         }
-        if attention_panel {
-            if !inbox.confirming && matches!(key.code, KeyCode::Char(']') | KeyCode::Char('[')) {
-                message = match inbox.project.as_ref().and_then(|project| {
-                    observed
-                        .attention
-                        .iter()
-                        .find(|page| &page.project == project)
-                }) {
-                    None => {
-                        "Select a project with p before paging. Cursors belong to that project."
-                            .into()
-                    }
-                    Some(page) if key.code == KeyCode::Char(']') && page.next_before.is_none() => {
-                        "No older page in this project's bounded journal window.".into()
-                    }
-                    Some(page) => {
-                        let before = if key.code == KeyCode::Char(']') {
-                            page.next_before.clone()
-                        } else {
-                            None
-                        };
-                        let payload = serde_json::json!([page.project, before]).to_string();
-                        match runtime::request(path, "attention-page", Some(&payload)) {
-                            Ok(()) => {
-                                inbox.selected = None;
-                                inbox.confirming = false;
-                                "Page loaded. n selects an unresolved item; filters apply to loaded pages only.".into()
-                            }
-                            Err(error) => error,
-                        }
-                    }
-                };
-                continue;
-            }
-            let operation = if inbox.confirming {
-                inbox.confirming = false;
-                (key.code == KeyCode::Enter).then_some("attention-resolve")
-            } else {
-                match key.code {
-                    KeyCode::Char('/') => {
-                        inbox.searching = true;
-                        None
-                    }
-                    KeyCode::Char('n') => {
-                        inbox.next_unresolved(&observed);
-                        None
-                    }
-                    KeyCode::Char('p') => {
-                        inbox.cycle_project(&observed);
-                        None
-                    }
-                    KeyCode::Char('t') => {
-                        inbox.kind = (inbox.kind + 1) % 6;
-                        inbox.select(&observed, 0);
-                        None
-                    }
-                    KeyCode::Char('v') => {
-                        inbox.include_resolved = false;
-                        inbox.receipt_filter = (inbox.receipt_filter + 1) % 3;
-                        inbox.select(&observed, 0);
-                        None
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        inbox.select(&observed, -1);
-                        None
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        inbox.select(&observed, 1);
-                        None
-                    }
-                    KeyCode::PageUp => {
-                        inbox.detail_offset = inbox.detail_offset.saturating_sub(rows.max(1));
-                        None
-                    }
-                    KeyCode::PageDown => {
-                        inbox.detail_offset = inbox.detail_offset.saturating_add(rows.max(1));
-                        None
-                    }
-                    KeyCode::Char('h') => {
-                        inbox.include_resolved = !inbox.include_resolved;
-                        inbox.receipt_filter = 0;
-                        inbox.select(&observed, 0);
-                        None
-                    }
-                    KeyCode::Char('r') => {
-                        inbox.confirming = inbox.selected.is_some();
-                        None
-                    }
-                    KeyCode::Enter => Some("attention-seen"),
-                    KeyCode::Char('a') => Some("attention-acknowledge"),
-                    KeyCode::Char('u') => Some("attention-reopen"),
-                    KeyCode::Char('o') => Some("attention-open"),
-                    KeyCode::Char('f') => Some("attention-refresh"),
-                    _ => None,
-                }
-            };
-            if let Some(op) = operation {
-                if op != "attention-refresh" && inbox.selected.is_none() {
-                    message = "Choose a visible item with arrows, n, or a click before recording a receipt or opening its terminal.".into();
-                    continue;
-                }
-                message = match runtime::request(path, op, inbox.selected.as_deref()) {
-                    Ok(()) => {
-                        if op == "attention-open" {
-                            return Ok(());
-                        }
-                        if op == "attention-refresh" {
-                            "Inbox refreshed.".into()
-                        } else {
-                            match op {
-                                "attention-seen" => "Seen recorded; still unresolved. No answer or approval sent.",
-                                "attention-acknowledge" => "Acknowledged; still unresolved. No answer or approval sent.",
-                                "attention-resolve" => "Marked resolved by you; no Claude answer, permission approval or task decision sent.",
-                                _ => "Reopened; unresolved again. No terminal input sent.",
-                            }.into()
-                        }
-                    }
-                    Err(error) => error,
-                };
-            }
-            continue;
-        }
+
         if history {
             let maximum = captured.lines().count().saturating_sub(rows);
             match key.code {
@@ -1945,173 +1416,5 @@ mod tests {
         assert!(text.contains("latest"));
         assert!(!text.contains("old"));
         assert!(text.contains("fixture"));
-    }
-
-    #[test]
-    fn inbox_selection_survives_new_items_and_acknowledgement_is_unresolved() {
-        let mut run = picker_fixture();
-        let item = |id: &str, ts: &str, resolved: Option<&str>| {
-            serde_json::from_value::<AttentionItem>(serde_json::json!({
-                "id":id,"project":"/project","evidence_hash":"hash","ts":ts,"kind":"question",
-                "task":null,"workspace":null,"workspace_root":null,"branch":null,"session_id":null,
-                "owner":null,"reason":"Question","message":null,"source":"Notification",
-                "seen_at":"seen","acknowledged_at":"acknowledged","resolved_at":resolved
-            }))
-            .unwrap()
-        };
-        run.attention.push(crate::model::AttentionSnapshot {
-            items: vec![item("old", "2026-10-13", None)],
-            ..Default::default()
-        });
-        let mut inbox = Inbox::default();
-        inbox.select(&run, 0);
-        let selected = inbox.selected.clone();
-        run.attention[0].items.push(item("new", "2026-10-14", None));
-        run.attention[0]
-            .items
-            .push(item("resolved", "2026-10-15", Some("resolved")));
-        assert_eq!(inbox.items(&run).len(), 2);
-        assert_eq!(inbox.index(&run), 1);
-        assert_eq!(inbox.selected, selected);
-        inbox.include_resolved = true;
-        assert_eq!(inbox.items(&run).len(), 3);
-    }
-
-    fn attention_item(project: &str, id: &str, kind: &str) -> AttentionItem {
-        serde_json::from_value(serde_json::json!({
-            "id":id,"project":project,"evidence_hash":"generation-a","ts":"2026-10-16T00:00:00Z",
-            "kind":kind,"task":"日本語 test","message":"inspect build output","owner":null
-        }))
-        .unwrap()
-    }
-
-    #[test]
-    fn inbox_filters_project_type_receipts_and_unicode_without_changing_evidence() {
-        let mut run = picker_fixture();
-        let mut acknowledged = attention_item("/a/project", "ack", "question");
-        acknowledged.acknowledged_at = Some("now".into());
-        acknowledged.seen_at = Some("now".into());
-        run.attention.push(crate::model::AttentionSnapshot {
-            items: vec![
-                acknowledged,
-                attention_item("/b/project", "other", "legacy-kind"),
-                attention_item("/a/project", "new", "question"),
-                attention_item("/a/project", "permission", "permission_prompt"),
-            ],
-            ..Default::default()
-        });
-        let before = serde_json::to_string(&run.attention).unwrap();
-        let mut inbox = Inbox {
-            project: Some("/a/project".into()),
-            kind: 2,
-            query: "日本 build".into(),
-            ..Default::default()
-        };
-        assert_eq!(
-            inbox
-                .items(&run)
-                .iter()
-                .map(|item| item.id.as_str())
-                .collect::<Vec<_>>(),
-            ["new", "ack"]
-        );
-        inbox.receipt_filter = 1;
-        assert_eq!(inbox.items(&run).len(), 1);
-        inbox.project = Some("/b/project".into());
-        inbox.kind = 5;
-        assert_eq!(inbox.items(&run)[0].id, "other");
-        assert_eq!(serde_json::to_string(&run.attention).unwrap(), before);
-    }
-
-    #[test]
-    fn refresh_cancels_resolution_on_disappearance_or_replaced_evidence() {
-        let mut run = picker_fixture();
-        run.attention.push(crate::model::AttentionSnapshot {
-            items: vec![
-                attention_item("/project", "same-id", "question"),
-                attention_item("/project", "neighbor", "question"),
-            ],
-            ..Default::default()
-        });
-        let mut inbox = Inbox::default();
-        inbox.reconcile(&run);
-        inbox.selected = Some(attention::token(&run.attention[0].items[0]));
-        inbox.confirming = true;
-        run.attention[0].items[0].evidence_hash = "generation-b".into();
-        inbox.reconcile(&run);
-        assert!(inbox.selected.is_none());
-        assert!(!inbox.confirming);
-        inbox.reconcile(&run);
-        assert!(inbox.selected.is_none());
-        inbox.next_unresolved(&run);
-        assert!(inbox.selected.is_some());
-        run.attention[0].items.clear();
-        inbox.reconcile(&run);
-        assert!(inbox.selected.is_none());
-    }
-
-    #[test]
-    fn next_unresolved_wraps_loaded_matches_and_skips_resolved_history() {
-        let mut run = picker_fixture();
-        let mut done = attention_item("/project", "done", "review");
-        done.resolved_at = Some("now".into());
-        run.attention.push(crate::model::AttentionSnapshot {
-            items: vec![
-                done,
-                attention_item("/project", "a", "question"),
-                attention_item("/project", "b", "question"),
-            ],
-            ..Default::default()
-        });
-        let mut inbox = Inbox {
-            include_resolved: true,
-            ..Default::default()
-        };
-        inbox.reconcile(&run);
-        assert_eq!(
-            inbox.selected,
-            Some(attention::token(&run.attention[0].items[1]))
-        );
-        inbox.next_unresolved(&run);
-        assert_eq!(
-            inbox.selected,
-            Some(attention::token(&run.attention[0].items[2]))
-        );
-        inbox.next_unresolved(&run);
-        assert_eq!(
-            inbox.selected,
-            Some(attention::token(&run.attention[0].items[1]))
-        );
-    }
-
-    #[test]
-    fn inbox_render_keeps_filters_controls_and_missing_selection_distinct() {
-        let mut run = picker_fixture();
-        run.attention.push(crate::model::AttentionSnapshot {
-            project: "/project".into(),
-            before: Some("cursor".into()),
-            items: vec![attention_item("/project", "question", "question")],
-            ..Default::default()
-        });
-        let inbox = Inbox::default();
-        for (width, height) in [(80, 24), (120, 40)] {
-            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal
-                .draw(|frame| {
-                    draw_attention(frame, &run, &inbox, "Receipt failed");
-                })
-                .unwrap();
-            let text = terminal
-                .backend()
-                .buffer()
-                .content()
-                .iter()
-                .map(|cell| cell.symbol())
-                .collect::<String>();
-            assert!(text.contains("Inbox filters"));
-            assert!(text.contains("next unresolved"));
-            assert!(text.contains("Receipt failed"));
-            assert!(!text.contains("inspect build output"));
-        }
     }
 }

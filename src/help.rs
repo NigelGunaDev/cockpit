@@ -37,10 +37,6 @@ const NOTES: &[(&str, &str)] = &[
         "Select a live session explicitly; no automatic replacement.",
     ),
     (
-        "Inbox navigation",
-        "/ search (Ctrl+u clears); n next unresolved; t type; v receipts; p project; ] older / [ latest.",
-    ),
-    (
         "Session organization",
         "t toggles projects/attention-first; e cycles observed activity, including unknown and stale.",
     ),
@@ -51,10 +47,6 @@ const NOTES: &[(&str, &str)] = &[
     (
         "Session groups",
         "Tab selects groups; Left/Right folds/expands. Up/Down selects terminals.",
-    ),
-    (
-        "Status counts",
-        "A: unresolved/unacknowledged. * means incomplete attention evidence.",
     ),
 ];
 
@@ -167,7 +159,7 @@ mod tests {
         assert!(!text(&terminal).contains("Ctrl+]"));
         help.key(KeyCode::End, 14);
         terminal.draw(|frame| help.draw(frame, "C-a")).unwrap();
-        assert!(text(&terminal).contains("Status counts"));
+        assert!(text(&terminal).contains("Session groups"));
         help.key(KeyCode::Home, 14);
         assert_eq!(help.state.selected(), Some(0));
         help.key(KeyCode::Up, 14);

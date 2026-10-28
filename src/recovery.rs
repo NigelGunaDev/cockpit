@@ -1,4 +1,4 @@
-//! Native session inventory and controls. The existing CLI owns process restoration.
+//! Native session inventory and controls. Bundled native operations perform process restoration.
 use crate::{
     agents::{self, Identity, Kind},
     model::{Run, Target},

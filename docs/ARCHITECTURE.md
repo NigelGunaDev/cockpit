@@ -1,34 +1,37 @@
 # Architecture
 
-| Component | Owner and responsibility |
+| Owner | Responsibility |
 |---|---|
-| Original tmux server | Existing task sessions, panes and agent processes |
-| Private transient tmux UI server | Cockpit layout, disposable original-server attachment clients and native input routing |
-| Rust supervisor | Discovery, target validation, focus, layout, panels and local reconciliation |
-| Installed workspace CLI | Task/workspace operations, observations, review/history readers, recovery and exact Close |
-| Project workflow files | Task lifecycle and approval authority |
-| Cockpit SQLite registry | User-local native-conversation restore intent and verified identity; no task lifecycle state |
-| Presentation preferences | Selected/pinned terminals and layout; no authority to accept a replacement runtime |
+| Original tmux server | Existing terminals, panes and agent processes |
+| Private transient tmux UI server | Layout and disposable attachments; native rendering/input |
+| Rust supervisor | Native directory/Git discovery, exact target validation, navigation, panels and reconciliation |
+| Private SQLite registry | Native conversation identity and enabled/forgotten restore intent |
+| Presentation preferences | Attached/selected terminals and layout; no replacement-target authority |
+| Embedded Node helper | Short-lived native recovery/Close operations, with no installed project code |
 
-`main.rs` discovers supported projects and the original socket. `observe.rs`
-combines CLI snapshots with original tmux identities. `runtime.rs` creates a
-private UI server and reconciles runtime/action requests. `tmux.rs` supplies
-native command execution; `layout.rs` and `ui.rs` manage layouts and navigation.
-`commands.rs`, `palette.rs`, `presentation.rs` and `key_hints.rs` expose controls.
+`main.rs` resolves directories, original socket and remembered state. `observe.rs`
+reads tmux and Git directly, accepting plain directories and enumerating registered
+worktrees. It neither looks for nor executes a project CLI. `runtime.rs` supervises
+the private UI server; `layout.rs`, `ui.rs`, `commands.rs`, `palette.rs` and
+`presentation.rs` supply the terminal interface. `changes.rs` reads local Git
+changes. Terminal scrollback is captured independently of original copy mode.
 
-`session_registry.rs` stores private conversation identity and enabled/forgotten
-intent. `agents.rs` validates native Claude/Codex/Pi JSONL evidence. `recovery.rs`
-provides inventory controls, and `restore.rs` runs a transient sequential worker
-through the installed CLI. Short registry transactions do not span agent startup;
-per-entry operation locks serialize recovery and Close. Exact ownership evidence
-remains separate from trust approval and whether a model is working.
+`session_registry.rs` owns durable saved intent and exact native/runtime/repository
+evidence. `agents.rs` validates native files. `recovery.rs` supplies inventory/link/
+Forget/Close controls. `restore.rs` runs one transient sequential worker, using
+per-entry operation locks and short registry transactions.
 
-`attention.rs`, `queue.rs`, `review.rs`, `changes.rs` and `history.rs` are supporting
-panels. They delegate state changes to the existing CLI. Viewing a terminal is
-separate from enabling input. Removing a tile is separate from forgetting or
-closing an agent. Completing a task is separate from review approval or merging.
+`backend.rs` embeds `backend/recovery.cjs` at compile time and invokes Node with a
+structured request as a scalar argument. The helper uses built-in modules and
+Git/tmux to validate/reopen exact conversations. No npm modules, project installer,
+external orchestration CLI or persistent Node service are involved. Entry PATH is
+captured before Node/toolchain shims can rewrite it. No native/model prompt is sent.
 
-There is no embedded terminal emulator, browser frontend or persistent cockpit
-application service. The private UI server is tmux, with original task processes
-remaining owned by their existing server. No active session or local state is
-part of this repository.
+Close disables remembered intent before exact foreground native-file ownership is
+checked by the process operation. Multiple panes, shared windows, changed generations
+and uncertain ownership are refused. The underlying tmux process remains independent
+of attachment clients. Task protocols and their data are not read or written.
+
+Legacy observation metadata fields remain compatible in serialized structures;
+there is no hook-backed status producer or attention receipt service. Session presence
+and native-file ownership do not establish model activity, trust or completed work.

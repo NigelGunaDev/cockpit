@@ -17,44 +17,47 @@ pub fn own_socket(path: &str) -> Result<(), String> {
 
 pub fn discover_project(start: &Path) -> Result<String, String> {
     let start = start.canonicalize().map_err(|e| e.to_string())?;
-    for root in start.ancestors() {
-        if root.join("sessions/bin/sessions").is_file() {
-            return Ok(root.to_string_lossy().into_owned());
-        }
+    if !start.is_dir() {
+        return Err("Project must be an existing directory".into());
     }
-    Err(format!(
-        "No compatible workspace CLI above {}. Use --project PATH with a project containing sessions/bin/sessions.",
-        start.display()
-    ))
+    let mut command = Command::new("git");
+    command
+        .args([
+            "-C",
+            &start.to_string_lossy(),
+            "rev-parse",
+            "--show-toplevel",
+        ])
+        .env("GIT_OPTIONAL_LOCKS", "0");
+    Ok(output(command)
+        .ok()
+        .and_then(|root| Path::new(root.trim()).canonicalize().ok())
+        .unwrap_or(start)
+        .to_string_lossy()
+        .into_owned())
 }
 
 pub fn project_snapshot(root: &str) -> Result<ProjectSnapshot, String> {
-    let mut command = Command::new(Path::new(root).join("sessions/bin/sessions"));
+    let root = discover_project(Path::new(root))?;
+    let mut command = Command::new("git");
     command
-        .args(["workspace", "snapshot", "--json"])
-        .current_dir(root)
-        .env("CLAUDE_PROJECT_DIR", root);
-    let text = output(command)?;
-    let value: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("Invalid workspace JSON: {e}"))?;
-    let has_tasks = value.get("tasks").is_some_and(|tasks| tasks.is_array());
-    let mut snapshot: ProjectSnapshot = serde_json::from_value(value).map_err(|e| {
-        format!("Invalid workspace snapshot; reinstall the updated sessions CLI: {e}")
-    })?;
-    if !has_tasks {
-        snapshot.complete = false;
-        snapshot.errors.push(serde_json::json!({"message":"Installed CLI has no task projection; update this project's installation for M4"}));
-    }
-    snapshot.attention.cli_root = root.into();
-    for task in &mut snapshot.tasks {
-        task.cli_root = root.into();
-    }
-    if snapshot.attention.project.is_empty() {
-        snapshot.attention.project = snapshot.project_root.clone();
-        snapshot.attention.complete = false;
-        snapshot.attention.errors.push(serde_json::json!({"message":"Installed CLI has no attention snapshot; update the project installation"}));
-    }
-    Ok(snapshot)
+        .args(["-C", &root, "worktree", "list", "--porcelain"])
+        .env("GIT_OPTIONAL_LOCKS", "0");
+    let roots = output(command)
+        .ok()
+        .map(|text| {
+            text.lines()
+                .filter_map(|line| line.strip_prefix("worktree "))
+                .take(64)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| vec![root.clone()]);
+    let workspaces = roots
+        .iter()
+        .map(|path| serde_json::json!({"root":path,"association":"workspace"}))
+        .collect::<Vec<_>>();
+    serde_json::from_value(serde_json::json!({"project_root":root,"complete":true,"workspaces":workspaces,"attention":{"project":root,"complete":true},"tasks":[]})).map_err(|e|e.to_string())
 }
 
 pub fn targets(socket: &str) -> Result<Vec<Target>, String> {
@@ -269,7 +272,74 @@ mod tests {
         );
     }
     #[test]
-    fn project_discovery_does_not_guess_other_projects() {
-        assert!(discover_project(Path::new("/dev")).is_err());
+    fn native_snapshot_uses_git_worktrees_and_never_runs_a_project_cli() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+        let root = std::env::temp_dir().join(format!(
+            "cp-native-project-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("sessions/bin")).unwrap();
+        fs::write(
+            root.join("sessions/bin/sessions"),
+            "#!/bin/sh\ntouch executed-cli\nexit 99\n",
+        )
+        .unwrap();
+        fs::set_permissions(
+            root.join("sessions/bin/sessions"),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        let plain = project_snapshot(root.to_str().unwrap()).unwrap();
+        assert!(plain.complete);
+        assert!(plain.tasks.is_empty());
+        assert_eq!(plain.workspaces.len(), 1);
+        let run = |args: &[&str]| {
+            let result = Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .env("GIT_AUTHOR_NAME", "test")
+                .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+                .env("GIT_COMMITTER_NAME", "test")
+                .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        };
+        run(&["init", "-q", "-b", "main"]);
+        run(&["commit", "-q", "--allow-empty", "-m", "fixture"]);
+        let worktree = root.join("child worktree");
+        run(&[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "work",
+            worktree.to_str().unwrap(),
+        ]);
+        let observed = project_snapshot(root.to_str().unwrap()).unwrap();
+        assert!(observed.complete);
+        assert_eq!(observed.workspaces.len(), 2);
+        assert!(
+            observed
+                .workspaces
+                .iter()
+                .any(|w| w.root == worktree.to_string_lossy())
+        );
+        assert!(!root.join("executed-cli").exists());
+        assert!(!root.join("sessions/sessions-state.json").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn project_discovery_accepts_plain_directories_without_an_installed_cli() {
+        assert_eq!(discover_project(Path::new("/dev")).unwrap(), "/dev");
+        assert!(discover_project(Path::new("/definitely-missing-cockpit-project")).is_err());
     }
 }

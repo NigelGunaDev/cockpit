@@ -1,51 +1,49 @@
 # Development and validation
 
-Development is paused. Preserve the existing terminal and workflow authority
-boundaries before adding features. Start with the root Cargo commands in README.
-All preserved Rust unit tests live beside the implementation under `src/`.
+Development is paused. Preserve native terminal fidelity and exact input ownership
+when returning to this app. Rust unit tests live beside implementation under `src/`;
+`backend/tests/recovery.test.cjs` covers the self-contained native process helper.
+No project installation or task framework is required.
 
-## Historical evidence
+## Checks
 
-Before extraction, the integration merge passed 96 Rust tests and the shared
-framework's JavaScript suite. Earlier disposable real-Codex checks demonstrated
-exact-conversation recovery following a user-initiated WSL restart, read-only
-restoration, repeat opening without duplicates, cancelled/confirmed exact Close,
-and deliberate-close exclusion after ordinary reopening/private tmux server loss.
-Those measurements are historical, not newly rerun by copying this repository.
-No synthetic performance measurement establishes real multi-agent responsiveness.
+```bash
+cargo test --locked -- --test-threads=1
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo build --release --locked
+node --test backend/tests/recovery.test.cjs
+python3 tests/terminal_smoke.py --binary target/release/cc-cockpit
+python3 tests/native_recovery_smoke.py --binary target/release/cc-cockpit
+```
 
-Outstanding manual checks include deliberate-close exclusion across another full
-WSL restart or PC power cycle, physical Windows Terminal keyboard/mouse/clipboard
-fidelity, and real Claude/Pi recovery. Native exit still does not automatically
-Forget; use explicit Close/Forget for restart exclusion.
+Integration drivers use private temporary tmux servers, fixture Git projects and
+explicit test registries/preferences. The terminal driver copies the binary away
+from its source checkout and exercises real PTY input, layouts and reopening in a
+project with no installed tooling. Recovery uses a synthetic Codex-shaped process
+holding its own fixture conversation file open, with no model request or real agent.
+Reports default to /tmp and raw output must stay outside the public repository.
 
-## Returning to this project
+## Executed standalone results
 
-1. Use a disposable Git project with a compatible installed workspace CLI.
-2. Run the preserved unit tests, formatting, Clippy and locked release build.
-3. Validate a focused native attachment, detach/reopen and exact target loss.
-4. Exercise splits/grid, native concurrent clients, sizing, scrolling and input.
-5. Validate recovery separately for each installed agent version and toolchain.
-6. Record actual results and resource measurements; retain failed attempts locally.
+The standalone build passed 68 Rust unit tests, formatting, all-target Clippy with
+warnings denied, and a locked release build using Rust/Cargo 1.99.1. Thirteen native
+helper tests passed, including exact identity, Git changes, launcher shims,
+replacement/shared-target refusal, idempotence, concurrent recovery and failed launch.
+Seven real-PTY terminal checks passed without installed project tooling. Six synthetic
+native-agent checks passed through the actual Rust supervisor and embedded helper:
+registration, server-loss recovery read-only, duplicate-free reopen, exact Close,
+forgotten-session exclusion and preservation of native history/Git/project files.
 
-Use separate tmux sockets and test conversations. Leave real tasks and original
-settings alone. Never automatically approve agent trust/permissions or fabricate
-workflow completion to get through a test.
+These are executed fixture checks, not real Claude/Codex/Pi compatibility, physical
+Windows Terminal or PC reboot acceptance. Historical real Codex observations predate
+the standalone refactor and do not validate the new packaging by themselves.
 
-## Extraction checks (2026-10-28)
+## Remaining manual validation
 
-Executed from this separate checkout using rustc 1.99.1 and Cargo 1.99.1:
-
-- All 96 Rust unit tests passed, with one test thread.
-- Formatting check passed.
-- All-target Clippy passed with warnings denied.
-- Locked offline release build passed using cached dependencies.
-- All 28 source/manifest file hashes matched the original snapshot.
-- Relative Markdown links resolved; allowlisted contents were screened for common
-  credentials, private paths and personal identifiers. The only matched email was
-  the reserved `test@example.invalid` fixture. This review is not a guarantee.
-
-No live terminal, agent, reboot or production performance test was rerun during
-extraction. Raw build/test output remains local and is not published. The original
-acceptance drivers depend on the original fixture layout and need deliberate
-adaptation before they can be runnable here.
+Use disposable conversations with each installed agent version. Check Shift+Enter,
+multiline editing, native prefixes, clipboard/paste, Unicode/IME, mouse/wheel,
+concurrent clients, resizing, clean/abrupt closure, and deliberate Close exclusion
+across a coordinated WSL/PC restart. Record actual resource measurements instead
+of treating synthetic tests as production performance. Do not auto-approve trust
+or permissions, replay interrupted commands, or treat session presence as work done.

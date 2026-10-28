@@ -1,10 +1,8 @@
-//! Evidence projection and exact terminal correlation; Node owns all receipts.
+//! Optional execution evidence projection and exact terminal correlation.
 use crate::model::{
     AttentionItem, AttentionSnapshot, ExecutionObservation, ProcessOwner, Run, Target,
 };
-use crate::tmux::{output, process_start};
-use std::path::Path;
-use std::process::Command;
+use crate::tmux::process_start;
 
 pub fn belongs_to_pane(owner: &ProcessOwner, target: &Target) -> bool {
     if target.dead
@@ -100,80 +98,6 @@ pub fn matching_target<'a>(item: &AttentionItem, run: &'a Run) -> Result<&'a Tar
         );
     }
     Ok(first)
-}
-
-pub fn receipt(item: &AttentionItem, action: &str, cli_root: &str) -> Result<(), String> {
-    if !["seen", "acknowledge", "resolve", "reopen"].contains(&action) {
-        return Err("Unknown attention receipt".into());
-    }
-    let mut command = Command::new(Path::new(cli_root).join("sessions/bin/sessions"));
-    command
-        .args(["needs-you", action, &item.id, "--json"])
-        .current_dir(cli_root)
-        .env("CLAUDE_PROJECT_DIR", &item.project)
-        .env_remove("CLAUDECODE");
-    let text = output(command)?;
-    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    if value.get("item_id").and_then(|id| id.as_str()) != Some(&item.id) {
-        return Err("Unexpected receipt response; reload the inbox".into());
-    }
-    Ok(())
-}
-
-pub fn counts(inboxes: &[AttentionSnapshot]) -> (usize, usize) {
-    (
-        inboxes.iter().map(|inbox| inbox.counts.unresolved).sum(),
-        inboxes
-            .iter()
-            .map(|inbox| inbox.counts.unacknowledged)
-            .sum(),
-    )
-}
-
-pub fn token(item: &AttentionItem) -> String {
-    serde_json::json!([item.project, item.id, item.evidence_hash]).to_string()
-}
-
-pub fn read_page(
-    cli_root: &str,
-    project: &str,
-    before: Option<&str>,
-) -> Result<AttentionSnapshot, String> {
-    let mut command = Command::new(Path::new(cli_root).join("sessions/bin/sessions"));
-    command.args(["needs-you", "list"]);
-    if let Some(before) = before {
-        if before.is_empty() || before.len() > 256 || before.chars().any(char::is_control) {
-            return Err("Invalid inbox page cursor".into());
-        }
-        command.arg(before);
-    }
-    command
-        .arg("--json")
-        .current_dir(cli_root)
-        .env("CLAUDE_PROJECT_DIR", cli_root)
-        .env_remove("CLAUDECODE");
-    let value: serde_json::Value =
-        serde_json::from_str(&output(command)?).map_err(|e| e.to_string())?;
-    if value.get("version").and_then(|v| v.as_u64()) != Some(1)
-        || value.get("project").and_then(|v| v.as_str()) != Some(project)
-    {
-        return Err(
-            "Inbox page unavailable or project mismatch; refresh or update the installed CLI"
-                .into(),
-        );
-    }
-    let mut page: AttentionSnapshot = serde_json::from_value(value).map_err(|e| e.to_string())?;
-    if page.items.len() > 200
-        || page
-            .items
-            .iter()
-            .any(|item| item.project != project || item.id.is_empty())
-    {
-        return Err("Invalid inbox page identities".into());
-    }
-    page.cli_root = cli_root.into();
-    page.before = before.map(str::to_owned);
-    Ok(page)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

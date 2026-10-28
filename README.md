@@ -1,22 +1,23 @@
 # Cockpit
 
-An experimental WSL terminal workspace for parallel agent sessions. Development
-is paused; this repository preserves the implementation for possible future work.
+An independent, experimental WSL terminal workspace. Development is paused;
+this repository preserves the app for future maintenance.
 
-Rust/Ratatui provides navigation and supporting panels. Stock tmux renders the
-interactive terminals through disposable attachments to existing tmux sessions.
-It supports focused, split and four-terminal layouts, saved selections, terminal
-history, attention, task review and remembered Claude/Codex/Pi conversations.
+Rust/Ratatui supplies navigation and panels. Stock tmux renders existing terminals
+through disposable attachments. Cockpit provides a session picker, sidebar,
+focused/split/grid layouts, independent scrollback, local Git diffs and remembered
+Claude/Codex/Pi conversations. Project discovery uses directories and Git worktrees.
+There is no project plugin, workspace CLI, task framework or application daemon to install.
 
-**This is a separate source repository, not a standalone orchestration system.**
-It requires a compatible workspace CLI installed in the projects it observes.
-The executable remains `cc-cockpit`; no binary or runtime-state rename was made.
+## Requirements
 
-## Build and check
+- A regular interactive WSL Linux terminal, outside another tmux client.
+- tmux, Git, and Rust/Cargo with edition 2024 support for building.
+- Node.js on PATH for remembered-agent recovery and exact Close. The helper is
+  embedded in the executable and uses only Node built-ins; no npm installation.
+- Agent executables on PATH when reopening their saved conversations.
 
-Use WSL Linux with Rust/Cargo, a C build toolchain for bundled SQLite, tmux and
-Node.js. Cargo edition 2024 is required; the extraction is tested using the local
-Rust toolchain recorded in [development notes](docs/DEVELOPMENT.md).
+## Build and launch
 
 ```bash
 cargo test --locked -- --test-threads=1
@@ -25,63 +26,63 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo build --release --locked
 ```
 
-The binary is `target/release/cc-cockpit`. For a user-local installation:
+Create an ordinary terminal session if you do not already have one:
 
 ```bash
-cargo install --locked --path .
+tmux new-session -d -s work -c /path/to/project
+./target/release/cc-cockpit --project /path/to/project
 ```
 
-## Launch
+Type your chosen agent command in that terminal. Additional terminals can be
+created with ordinary tmux commands. Cockpit does not create tasks or branches.
+For a user-local binary, run `cargo install --locked --path .`.
 
-From a regular interactive WSL terminal, outside tmux, use a project with a
-compatible installed workspace CLI and existing original tmux sessions:
+`--project` is repeatable. Without it, discovery uses the current directory or
+`COCKPIT_PROJECT_DIR`, plus matching remembered projects. Git worktrees are grouped
+under their project. Plain directories work for terminal use; native conversation
+recovery currently requires a saved Git repository identity and branch.
 
-```bash
-cc-cockpit --project /path/to/project --list
-cc-cockpit --project /path/to/project
-```
+`--list` lists observations without restoring agents. `--socket PATH` or
+`--socket-name NAME` chooses the original tmux server. A missing server is allowed
+when enabled remembered conversations can recover it. Use `--help` for arguments.
 
-The first command lists observations without attaching or restoring sessions.
-The interactive command can restore enabled remembered conversations. It sends
-no continuation prompt; recovered attachments start read-only. Specify
-`--socket /absolute/path/to/socket` or `--socket-name NAME` when needed. `--help`
-explains the launch arguments. Project discovery and the CLI requirements are
-covered in [integration notes](docs/INTEGRATION.md).
+## Controls
 
-The default cockpit leader is **Ctrl+]**, released before the next key:
+Press **Ctrl+]**, release it, then the next key. Change the leader with `--leader`.
 
 | Keys | Action |
 |---|---|
 | Leader, `s` | Session picker |
-| Leader, Space | Command search |
-| Leader, `?` | Controls guide |
+| Leader, Space | Search commands |
 | Leader, `b` | Sidebar |
 | Leader, `1` / `2` / `4` | Focus / split / grid |
+| Leader, Tab / Shift+Tab | Next / previous attached terminal |
+| Leader, `v` | Read-only / input control |
+| Leader, `[` | Independent terminal scrollback |
+| Leader, `g` | Read-only local Git changes |
 | Leader, `o` | Remembered sessions |
-| Leader, `d` | Detach cockpit, keeping original agents running |
+| Leader, `?` | Controls guide |
+| Leader, `d` | Detach, preserving original sessions |
 
-[Full controls](docs/USAGE.md) · [Architecture](docs/ARCHITECTURE.md) ·
-[Integration](docs/INTEGRATION.md) · [Development and validation](docs/DEVELOPMENT.md)
+The picker uses Enter to focus/replace and `a` to add a terminal to the layout.
+Task creation, protocol approvals, task queues, task-review panels, the old attention
+inbox and exported-conversation browser are outside this standalone app.
 
-## Status and limits
+[Usage](docs/USAGE.md) · [Architecture](docs/ARCHITECTURE.md) ·
+[Recovery](docs/RECOVERY.md) · [Development and validation](docs/DEVELOPMENT.md)
 
-Original tmux sessions own their agents. Cockpit owns temporary UI attachments;
-closing cockpit does not close the original agents. Native pane geometry is
-shared with other tmux clients. Input ownership checks cover ordinary target
-loss/replacement; concurrent changes to original tmux exit behavior are an
-explicitly unsupported case. Cockpit does not modify original tmux settings.
+## Boundaries
 
-Recovery needs exact native conversation and workspace evidence. Task completion
-and native agent exit do not imply Forget. Explicit Close/Forget controls saved
-restore intent. Full WSL-restart exclusion of a deliberately closed conversation,
-physical terminal fidelity across all agents, and real Claude/Pi recovery remain
-unverified. See the development notes before treating this as a daily driver.
+Original tmux sessions own the agent processes. Cockpit owns temporary UI attachments.
+Detaching preserves original processes; explicit Close is a separate confirmed action.
+Other tmux clients share pane geometry and can provide input. Original settings stay
+unchanged. Concurrent modification of original tmux exit behavior is unsupported.
 
-## Provenance and public contents
+Recovery reopens an exact saved conversation without submitting a prompt or approving
+trust/permissions. Restored terminals start read-only. Native exit does not mean Forget.
+Physical Windows Terminal and real-agent fidelity, power-cycle recovery and performance
+are separate manual checks; disposable shell/synthetic-agent tests do not establish them.
 
-[The baseline manifest](docs/PROVENANCE.json) records file hashes from the initial
-local import. Later changes may differ from those baseline hashes. Raw session
-transcripts, SQLite databases, prompts, runtime manifests, screenshots, test
-execution logs and historical evidence are excluded.
-
-See `LICENSE` for the project licence.
+[Baseline import hashes](docs/PROVENANCE.json) describe the original snapshot;
+current files intentionally differ. Raw transcripts, databases, runtime manifests,
+screenshots and execution logs are excluded. See `LICENSE` for the project licence.
