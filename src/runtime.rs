@@ -720,6 +720,14 @@ fn update_attention(run: &mut Run, _snapshots: &[crate::model::ProjectSnapshot])
 }
 
 fn action_inner(run: &mut Run, path: &Path, request: &Request) -> Result<(), String> {
+    if let Some(operation) = request.op.strip_prefix("presentation-") {
+        return presentation_action(
+            run,
+            path,
+            operation,
+            request.selected.as_deref().ok_or("Missing target key")?,
+        );
+    }
     if [
         "select",
         "add",
@@ -971,6 +979,71 @@ fn action_inner(run: &mut Run, path: &Path, request: &Request) -> Result<(), Str
             Ok(())
         }
         _ => Err("Unsupported cockpit operation".into()),
+    }
+}
+
+// Background opening creates only a detached attachment. It deliberately does
+// not reflow, select, close popups, or change the current input/control state.
+fn presentation_action(
+    run: &mut Run,
+    path: &Path,
+    operation: &str,
+    key: &str,
+) -> Result<(), String> {
+    let target = observe::targets(&run.original_socket)?
+        .into_iter()
+        .find(|target| target.key == key)
+        .ok_or("Presentation target is stale")?;
+    observe::validate(&target, false)?;
+    let existing = run.tiles.iter().position(|tile| tile.target.key == key);
+    match operation {
+        "open" => {
+            if existing.is_some() {
+                return Ok(());
+            }
+            if run.tiles.len() >= layout::MAX_TILES {
+                return Err(
+                    "Presentation capacity reached; close a tile before opening another".into(),
+                );
+            }
+            let original = Tmux::new(&target.socket);
+            for option in ["prefix", "prefix2"] {
+                if original.run(&["show-options", "-Av", "-t", &target.session_id, option])?
+                    == run.leader
+                {
+                    return Err("Cockpit leader conflicts with original tmux prefix".into());
+                }
+            }
+            if !run.targets.iter().any(|item| item.key == key) {
+                run.targets.push(target.clone());
+            }
+            let tile = create_tile(run, path, target, None)?;
+            run.tiles.push(tile);
+            Ok(())
+        }
+        "focus" => {
+            let index = existing.ok_or("Presentation view is missing; explicitly open it first")?;
+            run.recovery.user_navigated = true;
+            if run.selected.is_none() {
+                run.selected = Some(key.into());
+                reflow(run, path, true)
+            } else {
+                focus_tile(run, path, index)
+            }
+        }
+        "close" => {
+            let Some(index) = existing else {
+                return Ok(());
+            };
+            let tile = &run.tiles[index];
+            if tile.visible || run.selected.as_deref() == Some(key) {
+                return Err("Presentation is visible or selected; close it interactively".into());
+            }
+            Tmux::new(&run.ui_socket).run(&["kill-pane", "-t", &tile.pane])?;
+            run.tiles.remove(index);
+            Ok(())
+        }
+        _ => Err("Unknown presentation operation".into()),
     }
 }
 

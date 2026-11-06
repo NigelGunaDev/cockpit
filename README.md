@@ -86,3 +86,24 @@ are separate manual checks; disposable shell/synthetic-agent tests do not establ
 [Baseline import hashes](docs/PROVENANCE.json) describe the original snapshot;
 current files intentionally differ. Raw transcripts, databases, runtime manifests,
 screenshots and execution logs are excluded. See `LICENSE` for the project licence.
+
+## Presentation API
+
+`cc-cockpit presentation inspect --run /absolute/run.json` returns API version 1,
+the live supervisor identity, original tmux targets, private views, selection,
+and tile capacity. Consumers should pin the instance identity and target key;
+never infer a target from its display label.
+
+Use `presentation open|focus|close --run PATH --key KEY` for an existing original
+tmux target. Open is idempotent and creates a background attachment without
+changing selection or input control. Four occupied tiles produce a capacity
+error, rather than replacing another view. Focus requires an existing view;
+it never starts or recovers Claude. Close removes only an unselected, hidden
+view and preserves the original process. Visible/selected views must be closed
+interactively. Every operation validates the private manifest and target identity.
+
+Responses report `host_raised: false`: this selects within Cockpit and does not
+raise whichever terminal application contains it. The API requires a running
+Cockpit instance. Launch with `--run-dir` to choose a predictable private manifest
+location. CC Sessions can configure that path as its presentation adapter's `run`
+option. Existing internal `__action` commands remain implementation details.

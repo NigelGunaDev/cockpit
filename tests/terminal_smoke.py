@@ -111,7 +111,26 @@ with tempfile.TemporaryDirectory(prefix='cp-live-') as temp:
         enter_marker('one','AFTER-PICKER-')
         report['checks']['native_session_picker_opens_and_returns_to_terminal']=True
         two=next(t['key'] for t in manifest()['targets'] if t['session_name']=='two')
-        action('add',two)
+        def presentation(op, key=None):
+            command=[str(BINARY),'presentation',op,'--run',str(runfile)]
+            if key: command += ['--key',key]
+            reply=subprocess.run(command,env=env,capture_output=True,text=True,timeout=20)
+            assert reply.returncode==0,reply.stderr
+            return json.loads(reply.stdout)
+        before_selection=manifest()['selected']
+        original_control=manifest()['control']
+        opened=presentation('open',two)
+        assert opened['version']==1 and opened['selected']==before_selection
+        assert manifest()['control']==original_control
+        assert len(presentation('open',two)['views'])==2
+        enter_marker('one','BACKGROUND-OPEN-')
+        presentation('close',two)
+        assert len(manifest()['tiles'])==1 and manifest()['selected']==before_selection
+        assert int(tmux('display-message','-p','-t',panes['two'][0],'#{pane_pid}'))==panes['two'][1]
+        presentation('open',two)
+        focused=presentation('focus',two)
+        assert focused['selected']==two and focused['host_raised'] is False
+        report['checks']['presentation_background_idempotence_focus_and_view_only_close']=True
         wait(lambda:manifest()['selected']==two and len(manifest()['tiles'])==2)
         if not manifest()['control']:action('toggle-control')
         wait(lambda:manifest()['control'])

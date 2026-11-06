@@ -12,6 +12,7 @@ mod observe;
 mod palette;
 mod preferences;
 mod presentation;
+mod presentation_api;
 mod recovery;
 mod restore;
 mod runtime;
@@ -47,9 +48,12 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "presentation") {
+        return presentation_api::run(&args[1..]);
+    }
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!(
-            "cc-cockpit [--project PATH] [--socket PATH | --socket-name NAME]\n  [--session exact-name-or-ID] [--leader C-]] [--list] [--run-dir NEW-PATH]\n  [--preferences ABSOLUTE-PATH] [--registry ABSOLUTE-SQLITE-PATH]\n\nLaunch in a regular WSL terminal. Defaults below use Ctrl+]."
+            "cc-cockpit [--project PATH] [--socket PATH | --socket-name NAME]\n  [--session exact-name-or-ID] [--leader C-]] [--list] [--run-dir NEW-PATH]\n  [--preferences ABSOLUTE-PATH] [--registry ABSOLUTE-SQLITE-PATH]\n\nPresentation API: cc-cockpit presentation inspect|open|focus|close --run /absolute/run.json [--key KEY]\n\nLaunch in a regular WSL terminal. Defaults below use Ctrl+]."
         );
         for command in commands::COMMANDS {
             println!(
