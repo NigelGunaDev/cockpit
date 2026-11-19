@@ -57,7 +57,10 @@ pub fn project_snapshot(root: &str) -> Result<ProjectSnapshot, String> {
         .iter()
         .map(|path| serde_json::json!({"root":path,"association":"workspace"}))
         .collect::<Vec<_>>();
-    serde_json::from_value(serde_json::json!({"project_root":root,"complete":true,"workspaces":workspaces,"attention":{"project":root,"complete":true},"tasks":[]})).map_err(|e|e.to_string())
+    serde_json::from_value(
+        serde_json::json!({"project_root":root,"complete":true,"workspaces":workspaces}),
+    )
+    .map_err(|e| e.to_string())
 }
 
 pub fn targets(socket: &str) -> Result<Vec<Target>, String> {
@@ -141,11 +144,6 @@ pub fn associate(targets: &mut [Target], snapshots: &[ProjectSnapshot]) {
             // Workspace metadata identifies a Claude run, not necessarily this
             // particular pane. Keep pane-level identity explicitly unknown.
             target.claude_session_id = None;
-            if let Some(event) =
-                crate::attention::observation(target, std::slice::from_ref(&project.attention))
-            {
-                target.claude_session_id = Some(event.session_id.clone());
-            }
         }
     }
 }
@@ -295,7 +293,6 @@ mod tests {
         .unwrap();
         let plain = project_snapshot(root.to_str().unwrap()).unwrap();
         assert!(plain.complete);
-        assert!(plain.tasks.is_empty());
         assert_eq!(plain.workspaces.len(), 1);
         let run = |args: &[&str]| {
             let result = Command::new("git")

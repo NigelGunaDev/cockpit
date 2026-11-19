@@ -36,8 +36,29 @@ changes, with staged/base-comparison modes. These panels do not type into agents
 ## Session state
 
 Labels distinguish live, exited and disconnected terminals. Native presence is
-not model activity. The standalone build has no project-hook status or persistent
-attention inbox. Historical observation fields are not a promise of live evidence.
+not model activity: Cockpit shows activity only for terminals whose status file a
+presentation client registered.
+
+## Agent activity
+
+`presentation open --status-file PATH` registers a JSON file for a terminal. Each
+second Cockpit reads it and accepts it only when its `owner` (`pid` and process
+`start`) is the terminal's pane process or one of its descendants, and its
+`boot_id` or `owner_boot`, when present, is the current boot. `status` maps to:
+
+| `status` | Shown as |
+|---|---|
+| `working`, `busy` | ◐ working |
+| `waiting` (`detail` `permission_prompt` or another prompt) | × waiting: permission / question |
+| `idle`, `stop_observed` | ○ idle, or ✓ done until you select that terminal |
+| `errored`, `failed` | ! errored |
+| `exited`, `closed` | - session ended |
+| anything else, or an unverified file | · activity unknown, with the reason |
+
+A working or waiting state not refreshed for five minutes is marked stale. In the
+picker, `t` sorts terminals by attention (waiting, errored, done, working, idle)
+and `e` filters by activity. Terminals that need you keep their activity line in
+compact layouts. Registrations end when their terminal leaves the original server.
 
 Leader then `o` manages remembered native conversations; see [recovery](RECOVERY.md).
 New terminals can be created using ordinary tmux commands. Task/protocol creation,

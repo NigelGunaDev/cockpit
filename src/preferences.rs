@@ -158,9 +158,7 @@ mod tests {
             tiles: vec![],
             view: View::Grid,
             preferences: None,
-            attention: vec![],
-            tasks: vec![],
-            task_warnings: vec![],
+            reports: vec![],
             recent: vec![],
             recovery: Default::default(),
         };

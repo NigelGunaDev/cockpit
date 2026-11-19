@@ -38,7 +38,7 @@ const NOTES: &[(&str, &str)] = &[
     ),
     (
         "Session organization",
-        "t toggles projects/attention-first; e cycles observed activity, including unknown and stale.",
+        "t toggles projects/attention-first; e cycles reported activity, including unknown and stale.",
     ),
     (
         "History limitations",

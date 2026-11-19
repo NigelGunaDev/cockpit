@@ -1,5 +1,5 @@
 //! A bounded native status line: input mode/attention before optional context.
-use crate::{attention, commands, help, model::Run, observe};
+use crate::{activity, commands, help, model::Run, observe};
 use ratatui::text::Line;
 
 fn width(text: &str) -> usize {
@@ -137,11 +137,7 @@ pub fn line(run: &Run, columns: usize) -> String {
         let activity = if disconnected {
             "disconnected".into()
         } else {
-            attention::activity(target, &run.attention)
-                .split(" · ")
-                .next()
-                .unwrap_or("activity unknown")
-                .to_owned()
+            activity::describe(activity::report(run, target))
         };
         let routine = format!("{} · activity unknown", target.session_name);
         if run.message.is_empty() || run.message == routine {

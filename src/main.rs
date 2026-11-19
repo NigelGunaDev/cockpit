@@ -1,8 +1,9 @@
+mod activity;
 mod agents;
-mod attention;
 mod backend;
 mod changes;
 mod commands;
+mod failure;
 mod help;
 mod interaction;
 mod layout;
@@ -324,15 +325,7 @@ fn run() -> Result<(), String> {
         tiles: vec![],
         view: model::View::Focus,
         preferences: Some(preference_path),
-        attention: snapshots
-            .iter()
-            .map(|snapshot| snapshot.attention.clone())
-            .collect(),
-        task_warnings: vec![],
-        tasks: snapshots
-            .iter()
-            .flat_map(|snapshot| snapshot.tasks.clone())
-            .collect(),
+        reports: vec![],
         message: if errors.is_empty() {
             "Select a session · activity unknown".into()
         } else {

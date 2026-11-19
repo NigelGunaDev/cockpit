@@ -26,14 +26,13 @@ Reports default to /tmp and raw output must stay outside the public repository.
 
 ## Executed standalone results
 
-The standalone build passed 68 Rust unit tests, formatting, all-target Clippy with
-warnings denied, and a locked release build using Rust/Cargo 1.99.1. Thirteen native
-helper tests passed, including exact identity, Git changes, launcher shims,
-replacement/shared-target refusal, idempotence, concurrent recovery and failed launch.
-Seven real-PTY terminal checks passed without installed project tooling. Six synthetic
-native-agent checks passed through the actual Rust supervisor and embedded helper:
-registration, server-loss recovery read-only, duplicate-free reopen, exact Close,
-forgotten-session exclusion and preservation of native history/Git/project files.
+The structured-refusal and agent-activity revision passed 72 Rust unit tests,
+formatting, all-target Clippy with warnings denied, and a locked release build
+using Rust/Cargo 1.97.0. Eight real-PTY terminal checks, including the typed
+`view_visible` and `target_stale` refusals, and six synthetic native-agent checks
+passed in a Linux container whose kernel release string was set to a WSL value.
+In that container 8 of 13 native helper tests failed with "Invalid tmux inventory"
+under tmux 3.4, before and after this revision; the helper was not changed.
 
 These are executed fixture checks, not real Claude/Codex/Pi compatibility, physical
 Windows Terminal or PC reboot acceptance. Historical real Codex observations predate

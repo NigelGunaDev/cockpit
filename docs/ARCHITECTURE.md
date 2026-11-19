@@ -32,6 +32,9 @@ checked by the process operation. Multiple panes, shared windows, changed genera
 and uncertain ownership are refused. The underlying tmux process remains independent
 of attachment clients. Task protocols and their data are not read or written.
 
-Legacy observation metadata fields remain compatible in serialized structures;
-there is no hook-backed status producer or attention receipt service. Session presence
-and native-file ownership do not establish model activity, trust or completed work.
+`presentation_api.rs` is the public JSON surface; `failure.rs` holds its typed
+refusal codes, which travel from the supervisor through the private request and
+response files. `activity.rs` reads the status files that presentation clients
+register, binding each to its terminal through the recorded owner process. Cockpit
+produces no status itself: session presence and native-file ownership do not
+establish model activity, trust or completed work.

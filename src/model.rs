@@ -67,12 +67,9 @@ pub struct Run {
     pub tiles: Vec<Tile>,
     pub view: View,
     pub preferences: Option<String>,
+    /// Activity from status files registered by presentation clients.
     #[serde(default)]
-    pub attention: Vec<AttentionSnapshot>,
-    #[serde(default)]
-    pub tasks: Vec<TaskEntry>,
-    #[serde(default)]
-    pub task_warnings: Vec<String>,
+    pub reports: Vec<crate::activity::Report>,
     /// Explicit visits in this run, newest first. Never lifecycle state.
     #[serde(default)]
     pub recent: Vec<String>,
@@ -86,110 +83,12 @@ pub struct ProjectSnapshot {
     pub errors: Vec<serde_json::Value>,
     #[serde(default)]
     pub workspaces: Vec<Workspace>,
-    #[serde(default)]
-    pub attention: AttentionSnapshot,
-    #[serde(default)]
-    pub tasks: Vec<TaskEntry>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct TaskEntry {
-    #[serde(default)]
-    pub cli_root: String,
-    pub token: String,
-    pub project: String,
-    pub name: String,
-    pub file: String,
-    pub branch: String,
-    pub status: String,
-    pub source_root: String,
-    pub workspace: Option<String>,
-    pub workspace_name: Option<String>,
-    pub association: String,
-    pub current: bool,
-    pub state_health: String,
-    pub protocol: Option<String>,
-    #[serde(default)]
-    pub lifecycle: Option<serde_json::Value>,
-    pub supervision: Option<Supervision>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Supervision {
-    pub token: String,
-    pub can_approve: bool,
-    pub can_retry: bool,
-    pub stop: Option<serde_json::Value>,
-    pub plan_refused: Option<serde_json::Value>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct AttentionSnapshot {
-    #[serde(default)]
-    pub before: Option<String>,
-    #[serde(default)]
-    pub cli_root: String,
-    #[serde(default)]
-    pub project: String,
-    #[serde(default)]
-    pub complete: bool,
-    #[serde(default)]
-    pub errors: Vec<serde_json::Value>,
-    #[serde(default)]
-    pub counts: AttentionCounts,
-    #[serde(default)]
-    pub items: Vec<AttentionItem>,
-    #[serde(default)]
-    pub observations: Vec<ExecutionObservation>,
-    pub next_before: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct AttentionCounts {
-    pub unresolved: usize,
-    pub unseen: usize,
-    pub unacknowledged: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProcessOwner {
     pub pid: u32,
     pub start: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AttentionItem {
-    pub id: String,
-    pub project: String,
-    pub evidence_hash: String,
-    pub ts: String,
-    pub kind: String,
-    pub task: Option<String>,
-    pub workspace: Option<String>,
-    pub workspace_root: Option<String>,
-    pub branch: Option<String>,
-    pub session_id: Option<String>,
-    pub owner: Option<ProcessOwner>,
-    pub reason: Option<String>,
-    pub message: Option<String>,
-    pub source: Option<String>,
-    pub seen_at: Option<String>,
-    pub acknowledged_at: Option<String>,
-    pub resolved_at: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ExecutionObservation {
-    pub project: String,
-    pub workspace_root: Option<String>,
-    pub session_id: String,
-    pub owner: ProcessOwner,
-    pub status: String,
-    pub source: String,
-    pub detail: Option<String>,
-    pub ts: String,
-    #[serde(default)]
-    pub age_seconds: u64,
 }
 
 #[derive(Debug, Deserialize)]

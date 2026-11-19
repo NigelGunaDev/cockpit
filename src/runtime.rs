@@ -1,3 +1,4 @@
+use crate::failure::{Code, Failure};
 use crate::model::{Run, Target, Tile, View};
 use crate::{commands, layout, navigation, preferences};
 use crate::{
@@ -26,10 +27,17 @@ fn nonce() -> Result<String, String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-pub fn read_run(path: &Path) -> Result<Run, String> {
-    let meta = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-    let parent = fs::symlink_metadata(path.parent().ok_or("No run directory")?)
-        .map_err(|e| e.to_string())?;
+/// The manifest at `path`, checked to be a private, same-user resource. Whether
+/// its supervisor still runs is left to `live_run`.
+fn load_manifest(path: &Path) -> Result<Run, Failure> {
+    let unavailable = |message: String| Failure::new(Code::RunUnavailable, message);
+    let meta = fs::symlink_metadata(path)
+        .map_err(|e| unavailable(format!("No Cockpit run at {}: {e}", path.display())))?;
+    let parent = fs::symlink_metadata(
+        path.parent()
+            .ok_or_else(|| unavailable("No run directory".into()))?,
+    )
+    .map_err(|e| unavailable(e.to_string()))?;
     let uid = unsafe { libc::geteuid() };
     if !meta.file_type().is_file()
         || meta.uid() != uid
@@ -39,19 +47,72 @@ pub fn read_run(path: &Path) -> Result<Run, String> {
         || parent.uid() != uid
         || parent.mode() & 0o077 != 0
     {
-        return Err("Cockpit manifest and directory must be private same-user resources".into());
+        return Err(unavailable(
+            "Cockpit manifest and directory must be private same-user resources".into(),
+        ));
     }
     if meta.len() > 2 * 1024 * 1024 {
-        return Err("Run manifest is too large".into());
+        return Err(unavailable("Run manifest is too large".into()));
     }
-    let run: Run = serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    if process_start(run.supervisor_pid)? != run.supervisor_start
-        || run.ui_socket == run.original_socket
-    {
-        return Err("Stale or invalid cockpit run".into());
+    let run: Run = serde_json::from_slice(&fs::read(path).map_err(|e| unavailable(e.to_string()))?)
+        .map_err(|e| unavailable(format!("Invalid Cockpit manifest: {e}")))?;
+    if run.ui_socket == run.original_socket {
+        return Err(unavailable("Invalid cockpit run".into()));
     }
     Ok(run)
+}
+
+/// The manifest of a running Cockpit; `host_stale` when its supervisor has exited.
+pub fn live_run(path: &Path) -> Result<Run, Failure> {
+    let run = load_manifest(path)?;
+    if process_start(run.supervisor_pid).ok().as_deref() != Some(run.supervisor_start.as_str()) {
+        return Err(Failure::new(
+            Code::HostStale,
+            "The Cockpit that owns this run has exited",
+        ));
+    }
+    Ok(run)
+}
+
+pub fn read_run(path: &Path) -> Result<Run, String> {
+    live_run(path).map_err(String::from)
+}
+
+/// Creates the private run directory. An existing one is reclaimed only when it
+/// holds the manifest of a Cockpit whose supervisor has exited; its private tmux
+/// server is stopped only while it still has the recorded identity.
+fn prepare_directory(directory: &Path) -> Result<(), String> {
+    let create = || fs::DirBuilder::new().mode(0o700).create(directory);
+    match create() {
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let manifest = directory.join("run.json");
+            match live_run(&manifest) {
+                Ok(_) => {
+                    return Err(format!(
+                        "Another Cockpit is running with {}",
+                        directory.display()
+                    ));
+                }
+                Err(failure) if failure.code == Code::HostStale => {
+                    let stale = load_manifest(&manifest)?;
+                    drop(Resources {
+                        directory: directory.to_owned(),
+                        socket: stale.ui_socket,
+                        identity: Some((stale.ui_server_pid, stale.ui_server_start)),
+                    });
+                }
+                Err(failure) => {
+                    return Err(format!(
+                        "{} exists and is not a stale Cockpit run: {failure}",
+                        directory.display()
+                    ));
+                }
+            }
+            create()
+        }
+        other => other,
+    }
+    .map_err(|e| format!("Cannot create private run directory: {e}"))
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
@@ -73,10 +134,18 @@ struct Request {
     id: String,
     op: String,
     selected: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status_file: Option<String>,
 }
 
-pub fn request(path: &Path, op: &str, selected: Option<&str>) -> Result<(), String> {
-    read_run(path)?;
+/// One operation for the running supervisor, answered with its typed outcome.
+pub fn send(
+    path: &Path,
+    op: &str,
+    selected: Option<&str>,
+    status_file: Option<&str>,
+) -> Result<(), Failure> {
+    live_run(path)?;
     let directory = path.parent().unwrap();
     let id = format!("{}-{}", std::process::id(), nonce()?);
     let file = directory.join(format!("request-{id}.json"));
@@ -84,13 +153,17 @@ pub fn request(path: &Path, op: &str, selected: Option<&str>) -> Result<(), Stri
         id: id.clone(),
         op: op.into(),
         selected: selected.map(str::to_owned),
+        status_file: status_file.map(str::to_owned),
     };
     if serde_json::to_vec(&payload)
         .map_err(|e| e.to_string())?
         .len()
         > 4096
     {
-        return Err("Cockpit request exceeds 4096 bytes; shorten the task request".into());
+        return Err(Failure::new(
+            Code::InvalidRequest,
+            "Cockpit request exceeds 4096 bytes; shorten the task request",
+        ));
     }
     write_json(&file, &payload)?;
     let response = directory.join(format!("response-{id}.json"));
@@ -99,12 +172,20 @@ pub fn request(path: &Path, op: &str, selected: Option<&str>) -> Result<(), Stri
     while Instant::now() < deadline {
         if let Ok(text) = fs::read_to_string(&response) {
             let _ = fs::remove_file(&response);
-            return serde_json::from_str::<Result<(), String>>(&text).map_err(|e| e.to_string())?;
+            return serde_json::from_str::<Result<(), Failure>>(&text)
+                .map_err(|e| e.to_string())?;
         }
-        read_run(path)?;
+        live_run(path)?;
         std::thread::sleep(Duration::from_millis(20));
     }
-    Err("Cockpit action timed out; inspect the current selection before retrying".into())
+    Err(Failure::new(
+        Code::Timeout,
+        "Cockpit action timed out; inspect the current selection before retrying",
+    ))
+}
+
+pub fn request(path: &Path, op: &str, selected: Option<&str>) -> Result<(), String> {
+    send(path, op, selected, None).map_err(String::from)
 }
 
 /// Native bindings report refusals in tmux's message line, not its output pager.
@@ -713,21 +794,7 @@ fn apply_recovered(run: &mut Run, path: &Path, id: &str, target: Target) -> Resu
     Ok(())
 }
 
-fn update_attention(run: &mut Run, _snapshots: &[crate::model::ProjectSnapshot]) {
-    run.tasks.clear();
-    run.task_warnings.clear();
-    run.attention.clear();
-}
-
 fn action_inner(run: &mut Run, path: &Path, request: &Request) -> Result<(), String> {
-    if let Some(operation) = request.op.strip_prefix("presentation-") {
-        return presentation_action(
-            run,
-            path,
-            operation,
-            request.selected.as_deref().ok_or("Missing target key")?,
-        );
-    }
     if [
         "select",
         "add",
@@ -793,6 +860,7 @@ fn action_inner(run: &mut Run, path: &Path, request: &Request) -> Result<(), Str
                         id: request.id.clone(),
                         op: op.into(),
                         selected: None,
+                        status_file: None,
                     },
                 ),
                 commands::Dispatch::Detach => action_inner(
@@ -802,6 +870,7 @@ fn action_inner(run: &mut Run, path: &Path, request: &Request) -> Result<(), Str
                         id: request.id.clone(),
                         op: "detach".into(),
                         selected: None,
+                        status_file: None,
                     },
                 ),
                 commands::Dispatch::LiteralLeader => {
@@ -988,48 +1057,69 @@ fn presentation_action(
     run: &mut Run,
     path: &Path,
     operation: &str,
-    key: &str,
-) -> Result<(), String> {
+    request: &Request,
+) -> Result<(), Failure> {
+    let key = request
+        .selected
+        .as_deref()
+        .ok_or_else(|| Failure::new(Code::InvalidRequest, "Missing target key"))?;
+    let stale = |message: String| Failure::new(Code::TargetStale, message);
     let target = observe::targets(&run.original_socket)?
         .into_iter()
         .find(|target| target.key == key)
-        .ok_or("Presentation target is stale")?;
-    observe::validate(&target, false)?;
+        .ok_or_else(|| stale("Presentation target is stale".into()))?;
+    observe::validate(&target, false).map_err(stale)?;
     let existing = run.tiles.iter().position(|tile| tile.target.key == key);
     match operation {
         "open" => {
-            if existing.is_some() {
-                return Ok(());
-            }
-            if run.tiles.len() >= layout::MAX_TILES {
-                return Err(
-                    "Presentation capacity reached; close a tile before opening another".into(),
-                );
-            }
-            let original = Tmux::new(&target.socket);
-            for option in ["prefix", "prefix2"] {
-                if original.run(&["show-options", "-Av", "-t", &target.session_id, option])?
-                    == run.leader
-                {
-                    return Err("Cockpit leader conflicts with original tmux prefix".into());
+            if existing.is_none() {
+                if run.tiles.len() >= layout::MAX_TILES {
+                    return Err(Failure::new(
+                        Code::Capacity,
+                        "Presentation capacity reached; close a tile before opening another",
+                    ));
+                }
+                let original = Tmux::new(&target.socket);
+                for option in ["prefix", "prefix2"] {
+                    if original.run(&["show-options", "-Av", "-t", &target.session_id, option])?
+                        == run.leader
+                    {
+                        return Err(Failure::new(
+                            Code::LeaderConflict,
+                            "Cockpit leader conflicts with original tmux prefix",
+                        ));
+                    }
                 }
             }
             if !run.targets.iter().any(|item| item.key == key) {
                 run.targets.push(target.clone());
             }
-            let tile = create_tile(run, path, target, None)?;
-            run.tiles.push(tile);
+            if existing.is_none() {
+                let tile = create_tile(run, path, target, None)?;
+                run.tiles.push(tile);
+            }
+            if let Some(file) = &request.status_file {
+                crate::activity::register(run, key, file)
+                    .map_err(|message| Failure::new(Code::InvalidRequest, message))?;
+            }
             Ok(())
         }
         "focus" => {
-            let index = existing.ok_or("Presentation view is missing; explicitly open it first")?;
+            let index = existing.ok_or_else(|| {
+                Failure::new(
+                    Code::ViewMissing,
+                    "Presentation view is missing; explicitly open it first",
+                )
+            })?;
             run.recovery.user_navigated = true;
+            crate::activity::seen(run, key);
             if run.selected.is_none() {
                 run.selected = Some(key.into());
-                reflow(run, path, true)
+                reflow(run, path, true)?;
             } else {
-                focus_tile(run, path, index)
+                focus_tile(run, path, index)?;
             }
+            Ok(())
         }
         "close" => {
             let Some(index) = existing else {
@@ -1037,19 +1127,28 @@ fn presentation_action(
             };
             let tile = &run.tiles[index];
             if tile.visible || run.selected.as_deref() == Some(key) {
-                return Err("Presentation is visible or selected; close it interactively".into());
+                return Err(Failure::new(
+                    Code::ViewVisible,
+                    "Presentation is visible or selected; close it interactively",
+                ));
             }
             Tmux::new(&run.ui_socket).run(&["kill-pane", "-t", &tile.pane])?;
             run.tiles.remove(index);
             Ok(())
         }
-        _ => Err("Unknown presentation operation".into()),
+        _ => Err(Failure::new(
+            Code::InvalidRequest,
+            "Unknown presentation operation",
+        )),
     }
 }
 
-fn action(run: &mut Run, path: &Path, request: &Request) -> Result<(), String> {
+fn action(run: &mut Run, path: &Path, request: &Request) -> Result<(), Failure> {
     let before = run.selected.clone();
-    let result = action_inner(run, path, request);
+    let result = match request.op.strip_prefix("presentation-") {
+        Some(operation) => presentation_action(run, path, operation, request),
+        None => action_inner(run, path, request).map_err(Failure::from),
+    };
     let op = if request.op == "command" {
         request
             .selected
@@ -1281,12 +1380,9 @@ pub fn launch(
         nonce()?
     )));
     if !directory.is_absolute() {
-        return Err("--run-dir must be an absolute, new directory".into());
+        return Err("--run-dir must be an absolute path".into());
     }
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .map_err(|e| format!("Cannot create private run directory: {e}"))?;
+    prepare_directory(&directory)?;
     run.ui_socket = directory.join("ui.sock").to_string_lossy().into_owned();
     if run.ui_socket.len() >= 104 {
         let _ = fs::remove_dir(&directory);
@@ -1298,7 +1394,6 @@ pub fn launch(
         identity: None,
     };
     let path = directory.join("run.json");
-    update_attention(&mut run, &snapshots);
     crate::recovery::refresh(&mut run);
     write_json(&path, &run)?;
     let mut boot = Command::new("tmux");
@@ -1581,11 +1676,12 @@ pub fn launch(
                         };
                         recovery_worker.schedule(&mut run, entry, close)
                     })()
+                    .map_err(Failure::from)
                 } else {
                     action(&mut run, &path, &request)
                 };
                 if let Err(error) = &result {
-                    run.message = error.clone();
+                    run.message = error.message.clone();
                 }
                 write_json(&path, &run)?;
                 write_json(
@@ -1665,6 +1761,7 @@ pub fn launch(
                 }
                 Err(error) => run.message = format!("Observation stale: {error}"),
             }
+            crate::activity::refresh(&mut run);
             observed = Instant::now();
             dirty = true;
         }
@@ -1680,15 +1777,11 @@ pub fn launch(
                         for snapshot in &mut snapshots {
                             snapshot.complete = false;
                             snapshot.errors = vec![serde_json::json!({"message":run.message})];
-                            snapshot.attention.complete = false;
-                            snapshot.attention.errors =
-                                vec![serde_json::json!({"message":run.message})];
                         }
                     }
                 }
             }
             observe::associate(&mut run.targets, &snapshots);
-            update_attention(&mut run, &snapshots);
             crate::recovery::reconcile(&mut run);
             // Another cockpit may have completed a recovery while this worker
             // was busy. Adopt only the registry's newly verified generation.
@@ -1789,9 +1882,7 @@ mod tests {
             tiles: vec![],
             view: View::Focus,
             preferences: None,
-            attention: vec![],
-            tasks: vec![],
-            task_warnings: vec![],
+            reports: vec![],
             recent: vec![],
             recovery: Default::default(),
             message: String::new(),
@@ -1840,6 +1931,40 @@ mod tests {
         write_json(&path, &fixture(&directory)).unwrap();
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(read_run(&path).is_err());
+    }
+
+    #[test]
+    fn run_directories_are_reclaimed_only_from_an_exited_cockpit() {
+        let directory = PathBuf::from(format!("/tmp/cc-cockpit-unit-{}", nonce().unwrap()));
+        prepare_directory(&directory).unwrap();
+        let _cleanup = Resources {
+            directory: directory.clone(),
+            socket: String::new(),
+            identity: None,
+        };
+        let path = directory.join("run.json");
+        let mut run = fixture(&directory);
+        write_json(&path, &run).unwrap();
+        assert!(
+            prepare_directory(&directory)
+                .unwrap_err()
+                .contains("Another Cockpit")
+        );
+        assert!(path.exists());
+
+        run.supervisor_start.push('0');
+        write_json(&path, &run).unwrap();
+        assert_eq!(live_run(&path).unwrap_err().code, Code::HostStale);
+        prepare_directory(&directory).unwrap();
+        assert!(directory.is_dir() && !path.exists());
+
+        fs::write(directory.join("unrelated"), "keep").unwrap();
+        assert!(
+            prepare_directory(&directory)
+                .unwrap_err()
+                .contains("not a stale Cockpit run")
+        );
+        assert!(directory.join("unrelated").exists());
     }
 
     #[test]

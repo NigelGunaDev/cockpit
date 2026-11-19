@@ -65,8 +65,8 @@ Press **Ctrl+]**, release it, then the next key. Change the leader with `--leade
 | Leader, `d` | Detach, preserving original sessions |
 
 The picker uses Enter to focus/replace and `a` to add a terminal to the layout.
-Task creation, protocol approvals, task queues, task-review panels, the old attention
-inbox and exported-conversation browser are outside this standalone app.
+Task creation, protocol approvals, task queues, task-review panels and the
+exported-conversation browser are outside this standalone app.
 
 [Usage](docs/USAGE.md) · [Architecture](docs/ARCHITECTURE.md) ·
 [Recovery](docs/RECOVERY.md) · [Development and validation](docs/DEVELOPMENT.md)
@@ -89,21 +89,39 @@ screenshots and execution logs are excluded. See `LICENSE` for the project licen
 
 ## Presentation API
 
-`cc-cockpit presentation inspect --run /absolute/run.json` returns API version 1,
-the live supervisor identity, original tmux targets, private views, selection,
-and tile capacity. Consumers should pin the instance identity and target key;
-never infer a target from its display label.
+`cc-cockpit presentation inspect --run /absolute/run.json` prints one JSON object:
+API version 1, `ok`, the live supervisor identity (`instance`), the original tmux
+server (`socket`), its targets, private views, selection, reported `activity` and
+tile capacity. Consumers should pin the instance identity and target key; never
+infer a target from its display label.
 
 Use `presentation open|focus|close --run PATH --key KEY` for an existing original
 tmux target. Open is idempotent and creates a background attachment without
-changing selection or input control. Four occupied tiles produce a capacity
-error, rather than replacing another view. Focus requires an existing view;
-it never starts or recovers Claude. Close removes only an unselected, hidden
-view and preserves the original process. Visible/selected views must be closed
-interactively. Every operation validates the private manifest and target identity.
+changing selection or input control. Focus requires an existing view; it never
+starts or recovers an agent. Close removes only an unselected, hidden view and
+preserves the original process. Visible or selected views are closed interactively.
 
-Responses report `host_raised: false`: this selects within Cockpit and does not
-raise whichever terminal application contains it. The API requires a running
-Cockpit instance. Launch with `--run-dir` to choose a predictable private manifest
-location. CC Sessions can configure that path as its presentation adapter's `run`
-option. Existing internal `__action` commands remain implementation details.
+A refusal prints `{"version":1,"ok":false,"error":{"code","message"}}` and exits
+nonzero. Switch on `code`:
+
+| Code | Meaning |
+|---|---|
+| `invalid_request` | Missing or unknown arguments |
+| `run_unavailable` | No private, readable manifest at `--run` |
+| `host_stale` | The Cockpit that wrote the manifest has exited |
+| `target_stale` | The key no longer names a live terminal on the original server |
+| `view_missing` | Focus asked for a target that has no view |
+| `capacity` | All four tiles are occupied; no view is replaced |
+| `leader_conflict` | The original session uses Cockpit's leader as its prefix |
+| `view_visible` | Close asked for a visible or selected view |
+| `timeout` | The supervisor did not answer |
+| `failed` | Anything else; see `message` |
+
+`open --status-file /absolute/status.json` also registers the agent status file of
+that terminal; see [Usage](docs/USAGE.md#agent-activity). Responses report
+`host_raised: false`: this selects within Cockpit and does not raise whichever
+terminal application contains it. Launch with `--run-dir` for a predictable
+private manifest location; a directory left by a Cockpit that exited is reclaimed
+at the next launch, and one in use is refused. CC Sessions configures that path as
+its presentation adapter's `run` option. Internal `__action` commands remain
+implementation details.

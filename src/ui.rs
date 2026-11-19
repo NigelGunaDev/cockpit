@@ -18,7 +18,7 @@ use ratatui::{
 };
 
 use crate::{
-    attention,
+    activity,
     interaction::{self, Hits},
     model::Run,
     observe, presentation, runtime,
@@ -50,7 +50,7 @@ struct Picker {
     group: Option<String>,
     notice: String,
     attention_first: bool,
-    activity: attention::Activity,
+    activity: activity::Filter,
 }
 
 impl Picker {
@@ -99,11 +99,9 @@ impl Picker {
     }
     fn entries<'a>(&self, run: &'a Run) -> Vec<crate::navigation::Entry<'a>> {
         let mut entries = crate::navigation::entries(run, &self.query);
-        entries.retain(|entry| self.activity.matches(entry.target, &run.attention));
+        entries.retain(|entry| self.activity.matches(activity::report(run, entry.target)));
         if self.attention_first {
-            entries.sort_by_cached_key(|entry| {
-                std::cmp::Reverse(attention::unresolved_for(entry.target, run))
-            });
+            entries.sort_by_key(|entry| activity::rank(activity::report(run, entry.target)));
         }
         entries
     }
@@ -276,7 +274,7 @@ fn draw_picker(frame: &mut Frame, run: &Run, picker: &Picker, message: &str) -> 
     let filter = format!(
         "{} · e {}",
         if picker.attention_first {
-            "t attention first (loaded items)"
+            "t attention first"
         } else {
             "t projects"
         },
@@ -391,7 +389,7 @@ fn draw_picker(frame: &mut Frame, run: &Run, picker: &Picker, message: &str) -> 
         let activity = if entry.disconnected {
             "Attachment disconnected".into()
         } else {
-            attention::activity(target, &run.attention)
+            activity::describe(activity::report(run, target))
         };
         let highlighted = picker.group.is_none() && picker.selected.as_deref() == Some(&target.key);
         let secondary = Style::default().fg(if highlighted {
@@ -399,13 +397,6 @@ fn draw_picker(frame: &mut Frame, run: &Run, picker: &Picker, message: &str) -> 
         } else {
             presentation::MUTED
         });
-        // Exact attention correlation checks process identity. Keep that work in
-        // the existing attention-first view, not every ordinary sidebar redraw.
-        let unresolved = if picker.attention_first {
-            attention::unresolved_for(target, run)
-        } else {
-            0
-        };
         let mut lines = vec![Line::from(vec![
             Span::styled(
                 format!("  {}", observe::sanitize(&target.session_name)),
@@ -445,16 +436,6 @@ fn draw_picker(frame: &mut Frame, run: &Run, picker: &Picker, message: &str) -> 
         } else {
             lines.push(Line::styled(format!("  {badges}"), mode_style));
         }
-        if unresolved > 0 {
-            lines.push(Line::styled(
-                format!("  Attention: {unresolved} unresolved"),
-                if highlighted {
-                    secondary
-                } else {
-                    Style::default().fg(presentation::ATTENTION)
-                },
-            ));
-        }
         if picker.attention_first {
             lines.push(Line::styled(
                 format!(
@@ -464,10 +445,16 @@ fn draw_picker(frame: &mut Frame, run: &Run, picker: &Picker, message: &str) -> 
                 secondary,
             ));
         }
-        if frame.area().width >= 60 && !compact {
+        // Terminals that need the user keep their activity line even when compact.
+        let needs_user = activity::rank(activity::report(run, target)) <= 2;
+        if needs_user || (frame.area().width >= 60 && !compact) {
             lines.push(Line::styled(
                 observe::sanitize(&format!("    {activity}")),
-                secondary,
+                if needs_user && !highlighted {
+                    Style::default().fg(presentation::ATTENTION)
+                } else {
+                    secondary
+                },
             ));
         }
         regions.push((
@@ -484,7 +471,7 @@ fn draw_picker(frame: &mut Frame, run: &Run, picker: &Picker, message: &str) -> 
     let block = Block::default()
         .borders(Borders::ALL)
         .title(if picker.attention_first {
-            "Attention-first terminals (loaded evidence)"
+            "Terminals by attention: waiting, errored, done, working"
         } else {
             "Projects / workspaces / terminals"
         });
@@ -1214,9 +1201,7 @@ mod tests {
             tiles: vec![],
             view: crate::model::View::Focus,
             preferences: None,
-            attention: vec![],
-            tasks: vec![],
-            task_warnings: vec![],
+            reports: vec![],
             recent: vec![],
             recovery: Default::default(),
             message: String::new(),

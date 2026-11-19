@@ -111,12 +111,16 @@ with tempfile.TemporaryDirectory(prefix='cp-live-') as temp:
         enter_marker('one','AFTER-PICKER-')
         report['checks']['native_session_picker_opens_and_returns_to_terminal']=True
         two=next(t['key'] for t in manifest()['targets'] if t['session_name']=='two')
-        def presentation(op, key=None):
+        def presentation(op, key=None, refused=None):
             command=[str(BINARY),'presentation',op,'--run',str(runfile)]
             if key: command += ['--key',key]
             reply=subprocess.run(command,env=env,capture_output=True,text=True,timeout=20)
-            assert reply.returncode==0,reply.stderr
-            return json.loads(reply.stdout)
+            body=json.loads(reply.stdout)
+            if refused:
+                assert reply.returncode!=0 and body['ok'] is False and body['error']['code']==refused,reply.stdout
+                return body
+            assert reply.returncode==0 and body['ok'] is True,reply.stderr
+            return body
         before_selection=manifest()['selected']
         original_control=manifest()['control']
         opened=presentation('open',two)
@@ -130,6 +134,8 @@ with tempfile.TemporaryDirectory(prefix='cp-live-') as temp:
         presentation('open',two)
         focused=presentation('focus',two)
         assert focused['selected']==two and focused['host_raised'] is False
+        presentation('close',two,refused='view_visible')
+        presentation('focus','no-such-target',refused='target_stale')
         report['checks']['presentation_background_idempotence_focus_and_view_only_close']=True
         wait(lambda:manifest()['selected']==two and len(manifest()['tiles'])==2)
         if not manifest()['control']:action('toggle-control')
